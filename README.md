@@ -1,162 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Pro-Licious Frontend
 
-## Getting Started
+This is the fully production-ready frontend for the Pro-Licious platform, built with **Next.js (App Router)**, **React Redux**, **Socket.io**, and **Tailwind CSS**.
 
-First, run the development server:
+## Project Structure
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+The platform is divided into four distinct portals:
+- **Customer Portal:** `app/(customer)` / `app/page.tsx`
+- **Vendor Dashboard:** `app/vendor-dashboard`
+- **Admin Dashboard:** `app/admin-dashboard`
+- **Rider App:** `app/rider-dashboard`
+
+## How to Run the App
+
+1. **Start the Backend API:**
+   Ensure your Express backend is running. By default, the frontend expects the backend to run on port `5000`.
+   ```bash
+   cd ../pro-licious-be
+   npm run dev
+   ```
+
+2. **Start the Frontend Application:**
+   Open a new terminal window, navigate to the frontend directory, and start the Next.js development server:
+   ```bash
+   cd pro-licious-fe
+   npm install  # if you haven't installed dependencies yet
+   npm run dev
+   ```
+   
+3. **View the Application:**
+   Open your browser and navigate to [http://localhost:3000](http://localhost:3000).
+
+## Where APIs are Integrated
+
+All API and Socket logic is abstracted into global service files for easy management:
+
+### 1. REST API Client (`lib/axios.ts`)
+We use a global Axios instance to handle all standard HTTP requests to the backend.
+- **Location:** `lib/axios.ts`
+- **Configuration:** It automatically pulls the `NEXT_PUBLIC_API_URL` environment variable (defaults to `http://localhost:5000`) and attaches your JWT Bearer token to every request from local storage.
+- **Usage Example:** In `app/page.tsx`, you will see `api.get("/api/vendors")` being used to fetch live vendor data.
+
+### 2. Live Tracking / WebSockets (`lib/socket.ts`)
+We use `socket.io-client` to connect to the Express server for live order tracking and rider updates.
+- **Location:** `lib/socket.ts`
+- **Configuration:** Exposes `getSocket()` which initializes a singleton websocket connection to the backend.
+- **Usage Example:** In `app/rider-dashboard/page.tsx`, the Rider App connects to the socket and emits `update_location` events every 5 seconds to simulate live GPS tracking.
+
+### 3. Global State (`store/`)
+Redux Toolkit manages the global state for the application.
+- **Location:** `store/store.ts` and `store/slices/`
+- **Auth:** `authSlice.ts` handles user sessions and tokens.
+- **Cart:** `cartSlice.ts` handles cart items, quantities, and totals across the customer portal.
+
+## Environment Variables
+Create a `.env.local` file in the root of `pro-licious-fe` if your backend runs on a different port:
+```env
+NEXT_PUBLIC_API_URL=http://localhost:5000
+NEXT_PUBLIC_SOCKET_URL=http://localhost:5000
 ```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-
-
-# Prolicious Frontend
-
-Frontend application for the Prolicious food delivery platform built using Next.js App Router.
-
-## Tech Stack
-
-* Next.js
-* TypeScript
-* Tailwind CSS
-* App Router
-
----
-
-# Project Structure
-
-```bash
-app/
-│
-├── page.tsx                 # User homepage
-│
-├── admin/                   # Admin dashboard routes
-│   ├── page.tsx
-│   ├── users/
-│   ├── vendors/
-│   ├── orders/
-│   └── analytics/
-│
-├── vendor/                  # Vendor dashboard routes
-│   ├── page.tsx
-│   ├── products/
-│   ├── orders/
-│   └── profile/
-│
-├── delivery/                # Delivery partner routes
-│   ├── page.tsx
-│   ├── active-orders/
-│   └── history/
-│
-├── login/                   # Authentication pages
-                 
-```
-
----
-
-# Route Structure
-
-| Route          | Description         |
-| -------------- | ------------------- |
-| `/`            | User Homepage       |
-| `/admin`       | Admin Dashboard     |
-| `/vendor`      | Vendor Dashboard    |
-| `/delivery`    | Delivery Dashboard  |
-| `/login`       | Login Page          |
-
-
----
-
-# Local Development
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-Run development server:
-
-```bash
-npm run dev
-```
-
-Application runs on:
-
-```bash
-http://localhost:3000
-```
-
----
-
-# Backend Connection
-
-Frontend connects to the backend API:
-
-```bash
-http://localhost:5000
-```
-
-Example:
-
-```ts
-fetch("http://localhost:5000/api/restaurants")
-```
-
----
-
-# Authentication Roles
-
-The application supports multiple user roles:
-
-* USER
-* ADMIN
-* VENDOR
-* DELIVERY
-
-Users are redirected based on role after login.
-
----
-
-# Deployment
-
-Frontend can be deployed on:
-
-* Vercel
-* Netlify
-
-Backend is deployed separately.
-
----
-
-# Notes
-
-* Single Next.js application handles all dashboards using route-based architecture.
-* Role-based access control will be implemented using middleware and JWT authentication.
-* Can later be migrated into separate apps if scaling requires.
