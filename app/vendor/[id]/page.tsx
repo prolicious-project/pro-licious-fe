@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { addItem, updateQuantity } from "@/store/slices/cartSlice";
+import { setCart } from "@/store/slices/cartSlice";
 import { RootState } from "@/store/store";
 import { api } from "@/lib/axios";
 
@@ -23,6 +23,32 @@ export default function VendorMenuPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<string>("");
 
+  const fetchAndSyncCart = async (vendorIdVal: number, menuItemsList: any[]) => {
+    try {
+      const cartRes = await api.get(`/api/customer/cart`);
+      const activeCarts = cartRes.data?.data || [];
+      const vendorCart = activeCarts.find((c: any) => c.vendorId === vendorIdVal);
+      if (vendorCart) {
+        const reduxItems = vendorCart.items.map((ci: any) => {
+          const menuItem = menuItemsList.find((mi: any) => mi.id === ci.menuItemId) || {};
+          return {
+            id: ci.menuItemId,
+            cartItemId: ci.id,
+            name: menuItem.name || "Item",
+            price: ci.price,
+            quantity: ci.quantity,
+            vendorId: vendorIdVal,
+          };
+        });
+        dispatch(setCart({ items: reduxItems, vendorId: vendorIdVal }));
+      } else {
+        dispatch(setCart({ items: [], vendorId: null }));
+      }
+    } catch (e) {
+      console.error("Error syncing cart:", e);
+    }
+  };
+
   useEffect(() => {
     if (!isAuthenticated) { router.push("/login"); return; }
     const id = params.id;
@@ -30,15 +56,46 @@ export default function VendorMenuPage() {
       api.get(`/api/customer/vendors/${id}`),
       api.get(`/api/customer/vendors/${id}/menu`),
     ])
-      .then(([vendorRes, menuRes]) => {
+      .then(async ([vendorRes, menuRes]) => {
         setVendor(vendorRes.data?.data);
-        const items = menuRes.data?.data || [];
+        const items = menuRes.data?.data?.items || menuRes.data?.data || [];
         setMenu(items);
         if (items.length > 0 && items[0].categoryName) setActiveTab(items[0].categoryName);
+        
+        await fetchAndSyncCart(Number(id), items);
       })
       .catch(err => console.error("Error fetching vendor data:", err))
       .finally(() => setLoading(false));
   }, [isAuthenticated, params.id, router]);
+
+  const handleAddItem = async (item: any) => {
+    try {
+      await api.post("/api/customer/cart/items", { vendorId: Number(params.id), menuItemId: item.id, quantity: 1 });
+      await fetchAndSyncCart(Number(params.id), menu);
+    } catch (e) {
+      console.error("Error adding item to cart:", e);
+    }
+  };
+
+  const handleUpdateQuantity = async (item: any, newQty: number) => {
+    try {
+      const currentItem = cartItems.find(i => i.id === item.id);
+      if (!currentItem) return;
+
+      if (newQty <= 0) {
+        if (currentItem.cartItemId) {
+          await api.delete(`/api/customer/cart/items/${currentItem.cartItemId}`);
+        }
+      } else {
+        if (currentItem.cartItemId) {
+          await api.patch(`/api/customer/cart/items/${currentItem.cartItemId}`, { quantity: newQty });
+        }
+      }
+      await fetchAndSyncCart(Number(params.id), menu);
+    } catch (e) {
+      console.error("Error updating cart quantity:", e);
+    }
+  };
 
   const getQty = (itemId: number) => cartItems.find(i => i.id === itemId)?.quantity || 0;
   const cartTotal = cartItems.reduce((acc, i) => acc + parseFloat(i.price) * i.quantity, 0);
@@ -48,7 +105,7 @@ export default function VendorMenuPage() {
   if (loading) return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center bg-gray-50">
         <div className="animate-spin rounded-full h-12 w-12 border-4 border-red-600 border-t-transparent"></div>
       </div>
     </div>
@@ -57,7 +114,7 @@ export default function VendorMenuPage() {
   if (!vendor) return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="flex-1 flex items-center justify-center text-gray-500">Vendor not found.</div>
+      <div className="flex-1 flex items-center justify-center text-gray-500 bg-gray-50">Vendor not found.</div>
     </div>
   );
 
@@ -129,15 +186,15 @@ export default function VendorMenuPage() {
                       <div className="relative z-10 w-24 bg-white border border-red-200 rounded-lg shadow-md overflow-hidden">
                         {qty === 0 ? (
                           <button disabled={!item.isAvailable}
-                            onClick={() => dispatch(addItem({ id: item.id, name: item.name, price: item.price, quantity: 1, vendorId: vendor.id, imageUrl: "" }))}
+                            onClick={() => handleAddItem(item)}
                             className="w-full py-2 text-red-600 font-bold hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                             ADD +
                           </button>
                         ) : (
                           <div className="flex items-center justify-between px-2 py-1.5 bg-red-50 text-red-600 font-bold">
-                            <button onClick={() => dispatch(updateQuantity({ id: item.id, quantity: qty - 1 }))} className="p-1 hover:bg-red-100 rounded"><Minus className="w-4 h-4" /></button>
+                            <button onClick={() => handleUpdateQuantity(item, qty - 1)} className="p-1 hover:bg-red-100 rounded"><Minus className="w-4 h-4" /></button>
                             <span>{qty}</span>
-                            <button onClick={() => dispatch(updateQuantity({ id: item.id, quantity: qty + 1 }))} className="p-1 hover:bg-red-100 rounded"><Plus className="w-4 h-4" /></button>
+                            <button onClick={() => handleUpdateQuantity(item, qty + 1)} className="p-1 hover:bg-red-100 rounded"><Plus className="w-4 h-4" /></button>
                           </div>
                         )}
                       </div>
@@ -175,9 +232,9 @@ export default function VendorMenuPage() {
                           <p className="text-gray-500">₹{parseFloat(item.price).toFixed(0)}</p>
                         </div>
                         <div className="flex items-center justify-between w-20 border border-gray-200 rounded text-red-600 font-medium">
-                          <button onClick={() => dispatch(updateQuantity({ id: item.id, quantity: item.quantity - 1 }))} className="p-1 hover:bg-red-50 rounded"><Minus className="w-3 h-3" /></button>
+                          <button onClick={() => handleUpdateQuantity(item, item.quantity - 1)} className="p-1 hover:bg-red-50 rounded"><Minus className="w-3 h-3" /></button>
                           <span className="text-xs">{item.quantity}</span>
-                          <button onClick={() => dispatch(updateQuantity({ id: item.id, quantity: item.quantity + 1 }))} className="p-1 hover:bg-red-50 rounded"><Plus className="w-3 h-3" /></button>
+                          <button onClick={() => handleUpdateQuantity(item, item.quantity + 1)} className="p-1 hover:bg-red-50 rounded"><Plus className="w-3 h-3" /></button>
                         </div>
                       </div>
                     ))}
@@ -190,8 +247,8 @@ export default function VendorMenuPage() {
                     <span>Subtotal</span>
                     <span>₹{cartTotal.toFixed(2)}</span>
                   </div>
-                  <Link href="/checkout" className="block w-full bg-red-600 hover:bg-red-700 text-white text-center py-3 rounded-xl font-bold shadow-md transition-colors">
-                    Checkout →
+                  <Link href="/cart" className="block w-full bg-red-600 hover:bg-red-700 text-white text-center py-3 rounded-xl font-bold shadow-md transition-colors">
+                    View Cart →
                   </Link>
                 </div>
               )}
@@ -203,3 +260,4 @@ export default function VendorMenuPage() {
     </div>
   );
 }
+

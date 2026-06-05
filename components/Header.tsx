@@ -41,6 +41,9 @@ export default function Header() {
 
           {/* Actions */}
           <div className="flex items-center gap-6">
+            <Link href="/orders" className="text-sm font-bold text-gray-600 hover:text-red-600 transition-colors hidden sm:block">
+              My Orders
+            </Link>
             <Link href="/cart" className="relative text-gray-600 hover:text-red-600 transition-colors">
               <ShoppingCart className="w-6 h-6" />
               {cartItemCount > 0 && (
@@ -53,6 +56,7 @@ export default function Header() {
               <User className="w-6 h-6" />
             </Link>
           </div>
+
         </div>
       </div>
     </header>

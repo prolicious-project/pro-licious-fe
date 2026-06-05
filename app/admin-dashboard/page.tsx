@@ -5,15 +5,16 @@ import { useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
 import { api } from "@/lib/axios";
-import { LayoutDashboard, Store, Truck, Users, Activity, Settings, AlertTriangle, ShieldCheck, ArrowUpRight } from "lucide-react";
-import Link from "next/link";
+import { ArrowUpRight, Activity, ShieldCheck, AlertTriangle } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import AdminSidebar from "@/components/AdminSidebar";
 
 export default function AdminDashboard() {
   const router = useRouter();
   const { isAuthenticated, user } = useSelector((state: RootState) => state.auth);
   const [liveData, setLiveData] = useState<any>(null);
   const [dailyData, setDailyData] = useState<any[]>([]);
+  const [demandSupplyData, setDemandSupplyData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -21,11 +22,16 @@ export default function AdminDashboard() {
     Promise.all([
       api.get("/api/admin/dashboard/live"),
       api.get("/api/admin/analytics/daily"),
+      api.get("/api/admin/analytics/demand-supply"),
     ])
-      .then(([liveRes, dailyRes]) => {
+      .then(([liveRes, dailyRes, dsRes]) => {
         setLiveData(liveRes.data?.data);
         const daily = dailyRes.data?.data || [];
-        setDailyData(daily.map((d: any) => ({ date: d.date?.substring(5) || d.day, orders: parseInt(d.totalOrders || d.orders || 0) })));
+        setDailyData(daily.map((d: any) => ({
+          date: d.metricDate || d.date?.substring(5) || d.day,
+          orders: parseInt(d.totalOrders || d.orders || 0)
+        })).reverse());
+        setDemandSupplyData(dsRes.data?.data || []);
       })
       .catch(err => console.error("Admin dashboard error:", err))
       .finally(() => setLoading(false));
@@ -34,32 +40,17 @@ export default function AdminDashboard() {
   return (
     <div className="flex h-screen bg-zinc-50 overflow-hidden text-sm">
       {/* Sidebar */}
-      <aside className="w-64 bg-zinc-900 text-zinc-300 border-r border-zinc-800 flex-col hidden md:flex">
-        <div className="p-6 border-b border-zinc-800">
-          <Link href="/admin-dashboard" className="flex items-center gap-2">
-            <div className="bg-red-600 text-white p-1.5 rounded font-bold text-lg leading-none">P</div>
-            <span className="font-bold text-xl tracking-tight text-white">ADMIN<span className="text-red-600">.</span></span>
-          </Link>
-        </div>
-        <div className="flex-1 py-6 px-4 space-y-1">
-          <div className="text-xs font-bold text-zinc-500 uppercase px-3 mb-2 mt-2">Platform</div>
-          <Link href="/admin-dashboard" className="flex items-center gap-3 px-3 py-2 bg-red-600 text-white rounded-lg font-medium"><LayoutDashboard className="w-5 h-5" /> Live Overview</Link>
-          <Link href="#" className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-800 hover:text-white rounded-lg font-medium"><Store className="w-5 h-5" /> Vendors</Link>
-          <Link href="#" className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-800 hover:text-white rounded-lg font-medium"><Truck className="w-5 h-5" /> Riders</Link>
-          <Link href="#" className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-800 hover:text-white rounded-lg font-medium"><Users className="w-5 h-5" /> Customers</Link>
-          <div className="text-xs font-bold text-zinc-500 uppercase px-3 mb-2 mt-4">System</div>
-          <Link href="#" className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-800 hover:text-white rounded-lg font-medium"><Activity className="w-5 h-5" /> Analytics</Link>
-          <Link href="#" className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-800 hover:text-white rounded-lg font-medium"><AlertTriangle className="w-5 h-5" /> Tickets</Link>
-          <Link href="#" className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-800 hover:text-white rounded-lg font-medium"><ShieldCheck className="w-5 h-5" /> Audit Logs</Link>
-          <Link href="#" className="flex items-center gap-3 px-3 py-2 hover:bg-zinc-800 hover:text-white rounded-lg font-medium"><Settings className="w-5 h-5" /> Settings</Link>
-        </div>
-      </aside>
+      <AdminSidebar />
 
       {/* Main */}
       <main className="flex-1 flex flex-col overflow-hidden bg-white">
         <header className="bg-white border-b border-gray-200 px-8 py-4 flex justify-between items-center sticky top-0 z-10">
           <h2 className="text-xl font-bold text-gray-900">Platform Live Overview</h2>
           <div className="flex items-center gap-4">
+            <div className="text-right">
+              <p className="font-bold text-gray-900 text-sm">{user?.name || "Admin"}</p>
+              <p className="text-xs text-red-600 font-bold font-mono">ADMIN</p>
+            </div>
             <div className="w-10 h-10 bg-zinc-800 rounded-full flex items-center justify-center text-white font-bold shadow-sm">
               {user?.name?.[0] || "A"}
             </div>
@@ -78,12 +69,12 @@ export default function AdminDashboard() {
                 {[
                   { label: "Total Revenue", value: `₹${parseFloat(liveData?.totalRevenue || 0).toFixed(2)}`, color: "red", change: "+24%" },
                   { label: "Active Orders", value: liveData?.activeOrders ?? liveData?.totalOrders ?? 0, color: "blue", change: "+12%" },
-                  { label: "Online Vendors", value: liveData?.activeVendors ?? liveData?.totalVendors ?? 0, color: "orange" },
-                  { label: "Active Riders", value: liveData?.activeRiders ?? liveData?.totalRiders ?? 0, color: "purple" },
+                  { label: "Total Vendors", value: liveData?.vendors ?? liveData?.totalVendors ?? 0, color: "orange" },
+                  { label: "Active Riders", value: liveData?.onlineRiders ?? liveData?.activeRiders ?? 0, color: "purple" },
                 ].map((stat, i) => (
-                  <div key={i} className={`bg-white p-6 rounded-2xl border border-gray-100 shadow-sm border-l-4 border-l-${stat.color}-600`}>
+                  <div key={i} className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm border-l-4 border-l-red-600">
                     <div className="flex justify-between items-start mb-4">
-                      <div className={`p-2 bg-${stat.color}-50 text-${stat.color}-600 rounded-lg`}><ArrowUpRight className="w-5 h-5" /></div>
+                      <div className="p-2 bg-red-50 text-red-600 rounded-lg"><ArrowUpRight className="w-5 h-5" /></div>
                       {stat.change && <span className="text-green-500 text-xs font-bold bg-green-50 px-2 py-1 rounded">{stat.change}</span>}
                     </div>
                     <p className="text-gray-500 font-medium text-sm">{stat.label}</p>
@@ -92,25 +83,25 @@ export default function AdminDashboard() {
                 ))}
               </div>
 
-              {/* Chart */}
+              {/* Chart & Live Alerts */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-                  <h3 className="font-bold text-gray-900 text-lg mb-6">Platform Order Volume</h3>
+                  <h3 className="font-bold text-gray-900 text-lg mb-6">Platform Order Volume (Last 30 Days)</h3>
                   <div className="h-64">
                     {dailyData.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={dailyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                           <defs>
                             <linearGradient id="colorOrders" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3} />
-                              <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
+                              <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
+                              <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
                             </linearGradient>
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
                           <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: "#9ca3af", fontSize: 12 }} />
                           <YAxis axisLine={false} tickLine={false} tick={{ fill: "#9ca3af", fontSize: 12 }} />
                           <Tooltip />
-                          <Area type="monotone" dataKey="orders" stroke="#2563eb" strokeWidth={3} fillOpacity={1} fill="url(#colorOrders)" />
+                          <Area type="monotone" dataKey="orders" stroke="#ef4444" strokeWidth={3} fillOpacity={1} fill="url(#colorOrders)" />
                         </AreaChart>
                       </ResponsiveContainer>
                     ) : (
@@ -136,12 +127,58 @@ export default function AdminDashboard() {
                         <div className="bg-green-50 p-2 rounded text-green-600"><ShieldCheck className="w-4 h-4" /></div>
                         <div>
                           <p className="font-bold text-sm text-gray-900">All Systems Operational</p>
-                          <p className="text-xs text-gray-500">No alerts at this time.</p>
+                          <p className="text-xs text-gray-500">No active incidents or fraud warnings.</p>
                         </div>
                       </div>
                     )}
                   </div>
                 </div>
+              </div>
+
+              {/* Demand/Supply Analytics */}
+              <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="font-bold text-gray-900 text-lg">Zone Demand & Supply</h3>
+                  <span className="text-xs text-gray-500 font-medium font-mono">{demandSupplyData.length} records</span>
+                </div>
+                {demandSupplyData.length === 0 ? (
+                  <div className="text-center py-10 text-gray-400">No demand/supply data available.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="text-xs text-gray-500 bg-gray-50 uppercase font-bold border-b border-gray-100">
+                        <tr>
+                          <th className="px-6 py-4">Zone ID</th>
+                          <th className="px-6 py-4">Active Orders</th>
+                          <th className="px-6 py-4">Available Riders</th>
+                          <th className="px-6 py-4">Surge Factor</th>
+                          <th className="px-6 py-4">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {demandSupplyData.slice(0, 10).map((metric: any) => (
+                          <tr key={metric.id} className="border-b border-gray-50 hover:bg-gray-50">
+                            <td className="px-6 py-4 font-bold text-gray-900">Zone #{metric.zoneId}</td>
+                            <td className="px-6 py-4 font-bold text-gray-900">{metric.activeOrders}</td>
+                            <td className="px-6 py-4 text-gray-600">{metric.availableRiders}</td>
+                            <td className="px-6 py-4">
+                              <span className={`px-2 py-1 rounded text-xs font-bold ${parseFloat(metric.surgeFactor) > 1.0 ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
+                                {parseFloat(metric.surgeFactor).toFixed(2)}x
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              {parseFloat(metric.surgeFactor) > 1.2 ? (
+                                <span className="text-orange-600 font-bold text-xs">⚡ HIGH DEMAND</span>
+                              ) : (
+                                <span className="text-green-600 font-medium text-xs">NORMAL</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -150,3 +187,4 @@ export default function AdminDashboard() {
     </div>
   );
 }
+
