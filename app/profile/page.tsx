@@ -13,7 +13,7 @@ import { User, MapPin, Bell, LogOut, Edit3, Save, Trash2, CheckCircle2, UserCirc
 export default function ProfilePage() {
   const router = useRouter();
   const dispatch = useDispatch();
-  const { isAuthenticated } = useSelector((state: RootState) => state.auth);
+  const { isAuthenticated, user } = useSelector((state: RootState) => state.auth);
   
   const [profile, setProfile] = useState<any>(null);
   const [addresses, setAddresses] = useState<any[]>([]);
@@ -52,6 +52,15 @@ export default function ProfilePage() {
   useEffect(() => {
     if (!isAuthenticated) {
       router.push("/login");
+      return;
+    }
+    // Ensure only customers can access this page
+    if (user && user.role && user.role !== "CUSTOMER") {
+      // route to their dashboard based on role
+      if (user.role === "VENDOR") router.push("/vendor-dashboard");
+      else if (user.role === "RIDER") router.push("/rider-dashboard");
+      else if (user.role === "ADMIN") router.push("/admin-dashboard");
+      else router.push("/");
       return;
     }
     fetchProfileData();

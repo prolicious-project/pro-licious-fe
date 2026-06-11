@@ -8,8 +8,12 @@ export const initSocket = (token?: string) => {
   if (!socket) {
     socket = io(SOCKET_URL, {
       auth: { token },
-      transports: ["websocket"],
+      // allow polling fallback to ensure the initial handshake works in environments
+      // where a direct websocket connection is blocked or requires upgrade
+      transports: ["polling", "websocket"],
       autoConnect: false,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
     });
   }
   return socket;

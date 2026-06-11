@@ -9,12 +9,13 @@ import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
 import { api } from "@/lib/axios";
 import { ChevronLeft, Calendar, MapPin, Truck, CheckCircle2, Clock, XCircle, AlertCircle } from "lucide-react";
+import { getSocket } from "@/lib/socket";
 import Link from "next/link";
 
 export default function OrderDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { isAuthenticated } = useSelector((state: RootState) => state.auth);
+  const { isAuthenticated, token, user } = useSelector((state: RootState) => state.auth);
   const [order, setOrder] = useState<any>(null);
   const [tracking, setTracking] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,6 +45,26 @@ export default function OrderDetailPage() {
       return;
     }
     fetchOrderDetails();
+
+    const socket = getSocket(token || undefined);
+    socket.connect();
+    socket.emit("join_order_room", { orderId: Number(params.id), userId: user?.id, role: "CUSTOMER" });
+
+    const onStatus = (payload: any) => {
+      // Refresh order details on status change
+      fetchOrderDetails();
+    };
+    socket.on("order_status_changed", onStatus);
+
+    socket.on("rider_assigned", (p: any) => {
+      fetchOrderDetails();
+    });
+
+    return () => {
+      socket.off("order_status_changed", onStatus);
+      socket.off("rider_assigned");
+      socket.disconnect();
+    };
   }, [isAuthenticated, params.id, router]);
 
   const handleCancelOrder = async () => {

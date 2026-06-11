@@ -164,10 +164,13 @@ export default function VendorMenuPage() {
             <div className="space-y-6">
               {menu.filter(item => !activeTab || (item.categoryName || "Menu") === activeTab).map((item: any) => {
                 const qty = getQty(item.id);
+                const available = typeof item.isAvailable !== "undefined"
+                  ? item.isAvailable
+                  : (item.status === "ACTIVE" && (item.stockQuantity === -1 || (typeof item.stockQuantity === "number" && item.stockQuantity > 0)));
                 return (
                   <div key={item.id} className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex gap-6 hover:shadow-md transition-shadow">
                     <div className="flex-1">
-                      {!item.isAvailable && <span className="text-xs font-bold text-gray-400 mb-2 block">OUT OF STOCK</span>}
+                      {!available && <span className="text-xs font-bold text-gray-400 mb-2 block">OUT OF STOCK</span>}
                       <h3 className="text-lg font-bold text-gray-900 mb-1">{item.name}</h3>
                       {item.description && <p className="text-gray-500 text-sm mb-3 line-clamp-2">{item.description}</p>}
                       <div className="flex items-center gap-3">
@@ -185,7 +188,7 @@ export default function VendorMenuPage() {
                       </div>
                       <div className="relative z-10 w-24 bg-white border border-red-200 rounded-lg shadow-md overflow-hidden">
                         {qty === 0 ? (
-                          <button disabled={!item.isAvailable}
+                          <button disabled={!available}
                             onClick={() => handleAddItem(item)}
                             className="w-full py-2 text-red-600 font-bold hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                             ADD +

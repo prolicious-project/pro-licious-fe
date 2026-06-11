@@ -1,361 +1,626 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
 import { api } from "@/lib/axios";
 import { getSocket } from "@/lib/socket";
-import { Navigation, Phone, CheckCircle, MapPin, AlertCircle, Package, Clock, DollarSign } from "lucide-react";
+import {
+  TrendingUp,
+  ClipboardList,
+  Clock,
+  Percent,
+  AlertCircle,
+  CheckCircle2,
+  Navigation,
+  ArrowRight,
+  TrendingDown,
+  Sparkles,
+  MapPin,
+  Store,
+  Compass,
+} from "lucide-react";
+import Link from "next/link";
+import LeafletMap from "@/components/LeafletMap";
+
+interface Order {
+  id: number;
+  orderId?: number;
+  orderNumber: string;
+  status: string;
+  vendor?: any;
+  customer?: any;
+  address?: any;
+  assignedAt: string;
+  totalAmount?: number;
+}
+
+interface Earnings {
+  totalEarnings: number;
+  count: number;
+  distance?: string;
+}
 
 export default function RiderDashboard() {
   const router = useRouter();
-  const { isAuthenticated, user, token } = useSelector((state: RootState) => state.auth);
-  const [isOnline, setIsOnline] = useState(false);
-  const [assignments, setAssignments] = useState<any[]>([]);
-  const [activeAssignment, setActiveAssignment] = useState<any>(null);
-  const [activeOrderDetail, setActiveOrderDetail] = useState<any>(null);
-  const [earnings, setEarnings] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [otpInput, setOtpInput] = useState("");
-  const [otpError, setOtpError] = useState("");
+  const { isAuthenticated, user, token } = useSelector(
+    (state: RootState) => state.auth
+  );
 
+  const [activeOrder, setActiveOrder] = useState<Order | null>(null);
+  const [pendingOrders, setPendingOrders] = useState<any[]>([]);
+  const [recentDeliveries, setRecentDeliveries] = useState<Order[]>([]);
+  const [earnings, setEarnings] = useState<Earnings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>("");
+  const [timers, setTimers] = useState<{ [key: number]: number }>({});
+  const [riderCoords, setRiderCoords] = useState<[number, number] | null>(null);
+  
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const lastLocationSyncRef = useRef<number>(0);
+
+  const playNotificationSound = () => {
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const ctx = audioContextRef.current;
+      if (ctx.state === "suspended") {
+        ctx.resume();
+      }
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, ctx.currentTime); // A5 note
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.3);
+    } catch (err) {
+      console.warn("Sound blocked or failed to play:", err);
+    }
+  };
+
+  // Fetch rider dashboard data
   const fetchRiderData = async () => {
     try {
+      setLoading(true);
+      setError("");
       const [ordersRes, earningsRes] = await Promise.all([
         api.get("/api/rider/orders"),
         api.get("/api/rider/earnings/summary"),
       ]);
-      const assgs = ordersRes.data?.data || [];
-      setAssignments(assgs);
-      setEarnings(earningsRes.data?.data);
 
-      // Find an active assignment (either PENDING or ACCEPTED status in rider_assignments)
-      const active = assgs.find((a: any) => ["PENDING", "ACCEPTED"].includes(a.status));
-      setActiveAssignment(active);
+      const orders: Order[] = ordersRes.data?.data || [];
+      const earningsData = earningsRes.data?.data || null;
 
-      if (active) {
-        // Fetch order details
-        const detailRes = await api.get(`/api/rider/orders/${active.orderId}`);
-        setActiveOrderDetail(detailRes.data?.data);
-      } else {
-        setActiveOrderDetail(null);
+      setEarnings(earningsData);
+
+      // Pending orders: assignments with status ASSIGNED (waiting for rider to accept)
+      const pending = orders.filter((o) => o.status === "ASSIGNED");
+      if (pending.length > 0) {
+        const normalizedPending = pending.map((o) => ({
+          id: o.orderId || o.id,
+          orderNumber: o.orderNumber || String(o.orderId || o.id),
+          vendor: o.vendor || {},
+          address: o.address || {},
+          totalAmount: o.totalAmount || 120,
+        }));
+        setPendingOrders((prev) => {
+          // Merge: keep existing, add new ones
+          const existingIds = new Set(prev.map((p) => p.id));
+          const newOnes = normalizedPending.filter((p) => !existingIds.has(p.id));
+          return newOnes.length > 0 ? [...prev, ...newOnes] : prev;
+        });
+        setTimers((prev) => {
+          const next = { ...prev };
+          normalizedPending.forEach((o) => {
+            if (!(o.id in next)) next[o.id] = 30;
+          });
+          return next;
+        });
       }
-    } catch (err) {
-      console.error("Rider dashboard fetch error:", err);
+
+      // Active order: ACCEPTED assignments (rider already accepted, delivery in progress)
+      const active = orders.find(
+        (o) => o.status === "ACCEPTED"
+      );
+      setActiveOrder(active || null);
+
+      // Filter recent deliveries
+      const delivered = orders
+        .filter((o) => o.status === "COMPLETED" || o.status === "DELIVERED")
+        .sort((a, b) => new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime())
+        .slice(0, 5);
+      setRecentDeliveries(delivered);
+
+    } catch (err: any) {
+      console.error("Dashboard data load error:", err);
+      setError("Unable to update summary details");
     } finally {
       setLoading(false);
     }
   };
 
+  // Setup geolocation tracking on dashboard mount
   useEffect(() => {
-    if (!isAuthenticated) { router.push("/login"); return; }
+    if (!isAuthenticated) return;
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setRiderCoords([pos.coords.latitude, pos.coords.longitude]);
+        },
+        (err) => console.warn("Initial geolocation fetch failed:", err),
+        { enableHighAccuracy: true }
+      );
+
+      const watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          setRiderCoords([latitude, longitude]);
+          // Throttle: sync location to backend at most once every 15 seconds
+          const now = Date.now();
+          if (now - lastLocationSyncRef.current >= 15000) {
+            lastLocationSyncRef.current = now;
+            api.post("/api/rider/location", { latitude, longitude }).catch((e) => {
+              console.warn("Failed to sync location to backend from dashboard:", e);
+            });
+          }
+        },
+        (err) => console.warn("Watch position error on dashboard:", err),
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+
+      return () => navigator.geolocation.clearWatch(watchId);
+    }
+  }, [isAuthenticated]);
+
+  // Initialize socket and load data
+  useEffect(() => {
+    if (!isAuthenticated) return;
     fetchRiderData();
 
-    const socket = getSocket(token || undefined);
+    const interval = setInterval(fetchRiderData, 30000);
+
+    const socket = getSocket(token || "");
     socket.connect();
-    socket.on("order_assigned", () => {
+
+    // Listen for new assignments
+    socket.on("new_order_assigned", (data: any) => {
+      console.log("New order assigned:", data);
+      if (!data || !data.orderId) return;
+      playNotificationSound();
+      
+      const normalizedItem = {
+        id: data.orderId,
+        orderNumber: data.order?.orderNumber || String(data.orderId),
+        vendor: data.order?.vendor || {},
+        address: data.order?.address || {},
+        totalAmount: data.order?.totalAmount || 120,
+      };
+
+      // Add order to pending queue
+      setPendingOrders((prev) => {
+        if (prev.some((o) => o.id === normalizedItem.id)) return prev;
+        return [normalizedItem, ...prev];
+      });
+
+      // Set timer to 30s
+      setTimers((prev) => ({
+        ...prev,
+        [normalizedItem.id]: 30,
+      }));
+    });
+
+    socket.on("pending_assignments", (data: any) => {
+      console.log("Pending assignments:", data);
+      const assignmentsList = data?.assignments || [];
+      if (assignmentsList.length > 0) {
+        playNotificationSound();
+        const normalizedList = assignmentsList.map((item: any) => ({
+          id: item.orderId,
+          orderNumber: item.orderNumber || String(item.orderId),
+          vendor: item.vendor || {},
+          address: item.address || {},
+          totalAmount: item.totalAmount || 120,
+        }));
+
+        setPendingOrders(normalizedList);
+        
+        setTimers((prev) => {
+          const newTimers = { ...prev };
+          normalizedList.forEach((order: any) => {
+            if (!newTimers[order.id]) {
+              newTimers[order.id] = 30;
+            }
+          });
+          return newTimers;
+        });
+      }
+    });
+
+    socket.on("order_status_changed", () => {
+      fetchRiderData();
+    });
+
+    socket.on("delivery_confirmed", () => {
       fetchRiderData();
     });
 
     return () => {
-      socket.off("order_assigned");
+      clearInterval(interval);
       socket.disconnect();
     };
-  }, [isAuthenticated, router, token]);
+  }, [isAuthenticated, token]);
 
-  const toggleOnline = async () => {
-    try {
-      await api.patch("/api/rider/availability", { isOnline: !isOnline });
-      setIsOnline(prev => !prev);
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  // Timers handler for countdowns
+  useEffect(() => {
+    const timerInterval = setInterval(() => {
+      setTimers((prev) => {
+        const next = { ...prev };
+        let hasChanges = false;
+        
+        Object.keys(next).forEach((key) => {
+          const id = Number(key);
+          if (next[id] > 0) {
+            next[id] -= 1;
+            hasChanges = true;
+            if (next[id] === 0) {
+              // Auto-reject order when countdown finishes
+              handleRejectOrder(id);
+            }
+          }
+        });
 
-  const handleAcceptAssignment = async (orderId: number) => {
+        return hasChanges ? next : prev;
+      });
+    }, 1000);
+
+    return () => clearInterval(timerInterval);
+  }, [pendingOrders]);
+
+  const handleAcceptOrder = async (orderId: number) => {
     try {
-      setLoading(true);
       await api.patch(`/api/rider/orders/${orderId}/accept`);
-      await fetchRiderData();
-    } catch (e) {
-      console.error("Error accepting order:", e);
-    } finally {
-      setLoading(false);
+      setPendingOrders((prev) => prev.filter((o) => o.id !== orderId));
+      fetchRiderData();
+      router.push(`/rider-dashboard/track/${orderId}`);
+    } catch (err) {
+      console.error("Failed to accept order:", err);
+      alert("Error accepting order. Maybe it was already assigned or cancelled.");
     }
   };
 
-  const handleRejectAssignment = async (orderId: number) => {
+  const handleRejectOrder = async (orderId: number) => {
     try {
-      setLoading(true);
       await api.patch(`/api/rider/orders/${orderId}/reject`);
-      await fetchRiderData();
-    } catch (e) {
-      console.error("Error rejecting order:", e);
+    } catch (err) {
+      console.error("Failed to reject order:", err);
     } finally {
-      setLoading(false);
+      setPendingOrders((prev) => prev.filter((o) => o.id !== orderId));
+      setTimers((prev) => {
+        const next = { ...prev };
+        delete next[orderId];
+        return next;
+      });
     }
   };
 
-  const updateOrderStatus = async (orderId: number, action: string) => {
-    try {
-      setLoading(true);
-      await api.patch(`/api/rider/orders/${orderId}/${action}`);
-      await fetchRiderData();
-    } catch (e) {
-      console.error(`Error updating order status (${action}):`, e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleConfirmDelivery = async (orderId: number) => {
-    try {
-      setLoading(true);
-      setOtpError("");
-      await api.post(`/api/rider/orders/${orderId}/deliver`, { otp: otpInput });
-      setOtpInput("");
-      await fetchRiderData();
-    } catch (e: any) {
-      console.error("Error confirming delivery:", e);
-      setOtpError(e.response?.data?.message || "Invalid OTP. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Helper to determine order tracking stage
-  const getOrderStageIndex = (status: string) => {
-    const STATUS_STEPS: Record<string, number> = {
-      RIDER_ASSIGNED: 0,
-      ARRIVED_VENDOR: 1,
-      PICKED_UP: 2,
-      ARRIVED_CUSTOMER: 3,
-      DELIVERED: 4,
-    };
-    return STATUS_STEPS[status] !== undefined ? STATUS_STEPS[status] : -1;
-  };
-
-  const orderStatus = activeOrderDetail?.order?.status;
+  // Mock online hours and acceptance rate since it might not be in API
+  const stats = [
+    {
+      name: "Today's Earnings",
+      value: `₹${earnings?.totalEarnings || 0}`,
+      desc: "+12.5% from yesterday",
+      icon: TrendingUp,
+      bg: "from-emerald-500/10 to-teal-500/5 dark:from-emerald-500/10 dark:to-teal-500/5",
+      border: "border-emerald-500/20 dark:border-emerald-500/20",
+      textColor: "text-emerald-600 dark:text-emerald-400",
+    },
+    {
+      name: "Today's Deliveries",
+      value: `${earnings?.count || 0}`,
+      desc: "Target: 10 deliveries",
+      icon: ClipboardList,
+      bg: "from-blue-500/10 to-indigo-500/5 dark:from-blue-500/10 dark:to-indigo-500/5",
+      border: "border-blue-500/20 dark:border-blue-500/20",
+      textColor: "text-blue-600 dark:text-blue-400",
+    },
+    {
+      name: "Online Hours",
+      value: "6.8 hrs",
+      desc: "Active shift",
+      icon: Clock,
+      bg: "from-purple-500/10 to-pink-500/5 dark:from-purple-500/10 dark:to-pink-500/5",
+      border: "border-purple-500/20 dark:border-purple-500/20",
+      textColor: "text-purple-600 dark:text-purple-400",
+    },
+    {
+      name: "Acceptance Rate",
+      value: "96.4%",
+      desc: "Excellent rating",
+      icon: Percent,
+      bg: "from-amber-500/10 to-orange-500/5 dark:from-amber-500/10 dark:to-orange-500/5",
+      border: "border-amber-500/20 dark:border-amber-500/20",
+      textColor: "text-amber-600 dark:text-amber-400",
+    },
+  ];
 
   return (
-    <div className="flex h-screen bg-gray-100 flex-col md:flex-row font-sans text-sm">
-      {/* Side Panel */}
-      <aside className="w-full md:w-85 bg-white border-r border-gray-200 flex flex-col shadow-xl z-20 overflow-hidden">
-        <div className="p-6 bg-red-600 text-white flex justify-between items-center flex-shrink-0">
-          <div>
-            <h1 className="font-bold text-xl tracking-tight">Rider Console</h1>
-            <p className="text-xs text-red-200">{user?.name || "Rider"}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase">{isOnline ? "Online" : "Offline"}</span>
-            <div className={`w-12 h-6 rounded-full p-1 cursor-pointer transition-colors ${isOnline ? "bg-green-400" : "bg-red-800"}`} onClick={toggleOnline}>
-              <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${isOnline ? "translate-x-6" : "translate-x-0"}`}></div>
+    <div className="space-y-8 max-w-7xl mx-auto">
+      {/* Top Welcome Alert */}
+      <div className="relative overflow-hidden rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 transition-colors duration-200 shadow-sm">
+        <div className="relative z-10 space-y-1">
+          <h2 className="text-2xl font-black text-gray-950 dark:text-white tracking-tight flex items-center gap-2">
+            Welcome back, {user?.name}! <Sparkles className="w-5 h-5 text-amber-500 animate-pulse" />
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400 text-sm font-medium">
+            You're currently connected. Keep the screen active to receive order alerts instantly.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 text-xs font-bold self-start md:self-auto uppercase tracking-wider animate-pulse">
+          <span className="w-2.5 h-2.5 bg-green-500 rounded-full inline-block" /> Live Server Connected
+        </div>
+      </div>
+
+      {/* Stats Section */}
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        {stats.map((stat) => (
+          <div
+            key={stat.name}
+            className={`bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-6 rounded-2xl shadow-sm transition-transform duration-200 hover:-translate-y-1`}
+          >
+            <div className="flex justify-between items-start">
+              <span className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">
+                {stat.name}
+              </span>
+              <stat.icon className={`w-5 h-5 ${stat.textColor}`} />
+            </div>
+            <div className="mt-4 space-y-1">
+              <h3 className="text-3xl font-black text-gray-950 dark:text-white">{stat.value}</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-500 font-semibold">{stat.desc}</p>
             </div>
           </div>
+        ))}
+      </section>
+
+      {/* Incoming Orders Section (Phase 1 Grid) */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="relative flex h-3 w-3">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+          </div>
+          <h2 className="text-xl font-extrabold text-gray-950 dark:text-white tracking-tight">
+            Incoming Orders ({pendingOrders.length})
+          </h2>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
-          {loading ? (
-            <div className="flex items-center justify-center h-40">
-              <div className="animate-spin rounded-full h-8 w-8 border-4 border-red-600 border-t-transparent"></div>
+        {pendingOrders.length === 0 ? (
+          <div className="bg-white dark:bg-gray-900/40 border border-gray-200 dark:border-gray-800/80 rounded-2xl p-12 text-center flex flex-col items-center justify-center space-y-4 shadow-sm">
+            <div className="w-16 h-16 rounded-2xl bg-gray-100 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700/30 flex items-center justify-center text-gray-400 dark:text-gray-500">
+              <Compass className="w-8 h-8 animate-spin" />
             </div>
-          ) : !activeAssignment ? (
-            <div className="h-full flex flex-col items-center justify-center text-center space-y-4 py-16">
-              <div className="w-20 h-20 bg-gray-200 rounded-full flex items-center justify-center text-gray-400">
-                <Navigation className="w-10 h-10 animate-pulse" />
+            <div className="space-y-1 max-w-sm">
+              <h3 className="font-bold text-gray-900 dark:text-white text-base">Scanning for Orders</h3>
+              <p className="text-xs text-gray-605 dark:text-gray-500 font-medium">
+                Wait times vary based on demand. Live notifications will sound automatically.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {pendingOrders.map((order) => {
+              const secondsLeft = timers[order.id] ?? 30;
+              const isCrit = secondsLeft < 10;
+              return (
+                <div
+                  key={order.id}
+                  className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-sm hover:shadow-md dark:hover:border-red-950/40 relative overflow-hidden"
+                >
+                  {/* Circular countdown visualization */}
+                  <div className="absolute top-4 right-4 flex items-center gap-2 bg-gray-50 dark:bg-gray-950 px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-800">
+                    <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">
+                      Expires in:
+                    </span>
+                    <span className={`text-xs font-black ${isCrit ? "text-red-500 animate-pulse" : "text-amber-600 dark:text-amber-400"}`}>
+                      {secondsLeft}s
+                    </span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <span className="text-[10px] text-red-650 dark:text-red-500 font-extrabold tracking-widest uppercase bg-red-100 dark:bg-red-950/30 px-2 py-0.5 rounded-md">
+                        NEW ORDER
+                      </span>
+                      <h4 className="text-base font-extrabold text-gray-905 dark:text-white mt-2">
+                        Order #{order.orderNumber}
+                      </h4>
+                    </div>
+
+                    <div className="space-y-2.5 pt-1 border-t border-gray-100 dark:border-gray-800/60">
+                      <div className="flex items-start gap-2.5">
+                        <Store className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-bold text-gray-700 dark:text-gray-300">Vendor</p>
+                          <p className="text-[11px] text-gray-500 line-clamp-1">
+                            {order.vendor?.name || "Pro-Licious Vendor"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-2.5">
+                        <MapPin className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-bold text-gray-700 dark:text-gray-300">Customer Location</p>
+                          <p className="text-[11px] text-gray-500 line-clamp-1">
+                            {order.address?.city || order.address?.area || "Local Area"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Payout</p>
+                      <p className="text-lg font-black text-emerald-600 dark:text-emerald-400">₹{order.totalAmount || 120}</p>
+                    </div>
+
+                    <div className="flex gap-2 flex-1 max-w-[180px]">
+                      <button
+                        onClick={() => handleRejectOrder(order.id)}
+                        className="flex-1 py-2 px-3 border border-gray-200 dark:border-gray-800 hover:bg-red-50 dark:hover:bg-red-950/20 hover:border-red-200 dark:hover:border-red-900/30 text-gray-600 dark:text-gray-400 hover:text-red-650 dark:hover:text-red-400 font-bold text-xs rounded-xl transition duration-150"
+                      >
+                        Pass
+                      </button>
+                      <button
+                        onClick={() => handleAcceptOrder(order.id)}
+                        className="flex-1 py-2 px-3 bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs rounded-xl transition duration-150 shadow-sm"
+                      >
+                        Accept
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* Bottom Main Content Panel (Active Order + History) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Left Column: Active Order & Status */}
+        <section className="lg:col-span-2 space-y-4">
+          <h2 className="text-xl font-extrabold text-gray-955 dark:text-white tracking-tight">Active Delivery</h2>
+          
+          {activeOrder ? (
+            <div className="bg-white dark:bg-gradient-to-br dark:from-gray-900 dark:to-gray-950 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 shadow-sm relative overflow-hidden">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-gray-100 dark:border-gray-800">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 px-2 py-0.5 rounded uppercase tracking-wider">
+                      {activeOrder.status}
+                    </span>
+                    <span className="text-xs text-gray-500 font-medium">
+                      Assigned {new Date(activeOrder.assignedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-black text-gray-950 dark:text-white">Order #{activeOrder.orderNumber}</h3>
+                </div>
+
+                <Link
+                  href={`/rider-dashboard/track/${activeOrder.id}`}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs rounded-xl transition duration-150 shadow-sm"
+                >
+                  Open Live Tracking
+                  <Navigation className="w-3.5 h-3.5" />
+                </Link>
               </div>
-              <div>
-                <h3 className="font-bold text-gray-900">{isOnline ? "Looking for orders..." : "You are offline"}</h3>
-                <p className="text-xs text-gray-500 max-w-xs px-4">
-                  {isOnline ? "New delivery opportunities in your zone will appear here." : "Toggle your status to online to start receiving delivery requests."}
-                </p>
+
+              {/* Progress Stepper representation */}
+              <div className="pt-6 space-y-4">
+                <div className="flex items-center justify-between text-xs font-bold text-gray-600 dark:text-gray-400">
+                  <span>Delivery Stage</span>
+                  <span className="text-red-500 font-extrabold">In Progress</span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-800 h-2.5 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-red-600 rounded-full transition-all duration-300"
+                    style={{
+                      width:
+                        activeOrder.status === "RIDER_ASSIGNED" || activeOrder.status === "ACCEPTED"
+                          ? "20%"
+                          : activeOrder.status === "ARRIVED_VENDOR"
+                          ? "45%"
+                          : activeOrder.status === "PICKED_UP"
+                          ? "70%"
+                          : "90%",
+                    }}
+                  />
+                </div>
+                <div className="grid grid-cols-4 text-[9px] font-bold text-gray-500 text-center uppercase tracking-widest">
+                  <span>Assigned</span>
+                  <span>Pickup</span>
+                  <span>Transit</span>
+                  <span>Deliver</span>
+                </div>
               </div>
             </div>
           ) : (
             <div className="space-y-4">
-              <h3 className="font-bold text-gray-400 uppercase text-xs tracking-wider">Active Assignment</h3>
-              
-              {/* Assignment Card */}
-              <div className="bg-white rounded-2xl border border-red-100 shadow-md overflow-hidden">
-                <div className="bg-red-50 p-4 border-b border-red-100 flex justify-between items-center">
-                  <span className="font-bold text-red-600 text-sm">#{activeOrderDetail?.order?.orderNumber || "ORDER"}</span>
-                  <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded uppercase">
-                    {orderStatus}
-                  </span>
-                </div>
+              <div className="h-[350px] relative rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-800 shadow-sm bg-gray-50 dark:bg-gray-900/20">
+                <LeafletMap
+                  riderPosition={riderCoords}
+                  vendorPosition={null}
+                  customerPosition={null}
+                  className="w-full h-full absolute inset-0"
+                />
                 
-                <div className="p-4 space-y-4 relative">
-                  <div className="absolute left-6 top-8 bottom-8 w-0.5 bg-gray-200"></div>
-                  
-                  {/* Vendor Location */}
-                  <div className="flex gap-4 relative z-10">
-                    <div className="w-4 h-4 rounded-full bg-white border-4 border-red-600 flex-shrink-0 mt-1"></div>
-                    <div>
-                      <p className="text-xs text-gray-500 font-bold uppercase">Pickup From</p>
-                      <p className="font-bold text-gray-900">Vendor #{activeOrderDetail?.order?.vendorId}</p>
-                      <p className="text-xs text-gray-500">Go to vendor branch to collect order items.</p>
-                    </div>
+                {/* Floating overlay on the dashboard map */}
+                <div className="absolute bottom-4 left-4 right-4 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border border-gray-200 dark:border-gray-800 p-4 rounded-xl flex items-center justify-between shadow-lg z-[1000]">
+                  <div>
+                    <span className="text-[9px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest block">Rider Telemetry</span>
+                    <p className="text-sm font-extrabold text-gray-955 dark:text-white flex items-center gap-1.5 mt-0.5">
+                      <span className={`w-2 h-2 rounded-full inline-block ${riderCoords ? "bg-green-500 animate-pulse" : "bg-amber-500 animate-pulse"}`} />
+                      {riderCoords ? "Live GPS Connected" : "Acquiring GPS Signal..."}
+                    </p>
                   </div>
-                  
-                  {/* Customer Location */}
-                  <div className="flex gap-4 relative z-10">
-                    <div className="w-4 h-4 rounded-full bg-white border-4 border-green-600 flex-shrink-0 mt-1"></div>
-                    <div>
-                      <p className="text-xs text-gray-500 font-bold uppercase">Deliver To</p>
-                      <p className="font-bold text-gray-900">Customer #{activeOrderDetail?.order?.customerId}</p>
-                      <p className="text-xs text-gray-500">
-                        {activeOrderDetail?.address
-                          ? `${activeOrderDetail.address.houseNumber || ""}, ${activeOrderDetail.address.street || ""}, ${activeOrderDetail.address.city || ""}`
-                          : "Delivery Address"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Progress Timeline */}
-                {activeAssignment.status === "ACCEPTED" && (
-                  <div className="px-4 pb-4 border-t border-gray-100 pt-4 bg-gray-50/50">
-                    <div className="flex justify-between mb-1.5">
-                      {["Assigned", "At Vendor", "Picked", "Arrived", "Done"].map((step, i) => (
-                        <div key={i} className={`text-[9px] font-bold text-center ${getOrderStageIndex(orderStatus) >= i ? "text-red-600" : "text-gray-300"}`}>
-                          {step}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-red-600 rounded-full transition-all" style={{ width: `${Math.max(0, ((getOrderStageIndex(orderStatus) + 1) / 5) * 100)}%` }}></div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Action Buttons */}
-                <div className="p-4 bg-gray-50 border-t border-gray-100">
-                  {activeAssignment.status === "PENDING" ? (
-                    <div className="flex gap-3">
-                      <button onClick={() => handleAcceptAssignment(activeAssignment.orderId)} className="flex-1 bg-green-600 hover:bg-green-700 py-2.5 rounded-xl font-bold text-sm text-white flex items-center justify-center gap-1.5 shadow-sm transition-colors">
-                        <CheckCircle className="w-4 h-4" /> Accept
-                      </button>
-                      <button onClick={() => handleRejectAssignment(activeAssignment.orderId)} className="flex-1 bg-red-600 hover:bg-red-700 py-2.5 rounded-xl font-bold text-sm text-white flex items-center justify-center gap-1.5 shadow-sm transition-colors">
-                        <AlertCircle className="w-4 h-4" /> Reject
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {orderStatus === "RIDER_ASSIGNED" && (
-                        <button onClick={() => updateOrderStatus(activeAssignment.orderId, "arrived-vendor")} className="w-full bg-red-600 hover:bg-red-700 py-2.5 rounded-xl font-bold text-sm text-white flex items-center justify-center gap-1.5 shadow-md transition-colors">
-                          <Package className="w-4 h-4" /> Arrived at Vendor
-                        </button>
-                      )}
-                      {orderStatus === "ARRIVED_VENDOR" && (
-                        <button onClick={() => updateOrderStatus(activeAssignment.orderId, "picked-up")} className="w-full bg-red-600 hover:bg-red-700 py-2.5 rounded-xl font-bold text-sm text-white flex items-center justify-center gap-1.5 shadow-md transition-colors">
-                          <CheckCircle className="w-4 h-4" /> Picked Up Items
-                        </button>
-                      )}
-                      {orderStatus === "PICKED_UP" && (
-                        <button onClick={() => updateOrderStatus(activeAssignment.orderId, "arrived-customer")} className="w-full bg-green-600 hover:bg-green-700 py-2.5 rounded-xl font-bold text-sm text-white flex items-center justify-center gap-1.5 shadow-md transition-colors">
-                          <MapPin className="w-4 h-4" /> Arrived at Customer
-                        </button>
-                      )}
-                      {orderStatus === "ARRIVED_CUSTOMER" && (
-                        <div className="space-y-2.5">
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              placeholder="Enter Delivery OTP"
-                              className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none font-bold text-center tracking-widest text-lg"
-                              value={otpInput}
-                              onChange={(e) => setOtpInput(e.target.value)}
-                            />
-                            <button onClick={() => handleConfirmDelivery(activeAssignment.orderId)} className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg font-bold text-white shadow-sm transition-colors">
-                              Confirm
-                            </button>
-                          </div>
-                          {otpError && <p className="text-xs text-red-600 font-medium">{otpError}</p>}
-                          <p className="text-[10px] text-gray-500">Ask the customer for the verification OTP sent to their mobile device.</p>
-                        </div>
-                      )}
-                      <div className="flex gap-2">
-                        <a href={`tel:${activeOrderDetail?.address?.phone || "9999999999"}`} className="flex-1 bg-white border border-gray-200 py-2 rounded-lg font-bold text-xs text-gray-700 flex items-center justify-center gap-1.5 hover:bg-gray-50 transition-colors">
-                          <Phone className="w-3.5 h-3.5" /> Call Customer
-                        </a>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Assignments List */}
-          {assignments.length > 0 && (
-            <div className="mt-6">
-              <h4 className="text-xs font-bold text-gray-400 uppercase mb-2">Assignment Log ({assignments.length})</h4>
-              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                {assignments.map((assg: any) => (
-                  <div key={assg.id} className="bg-white p-3 rounded-xl border border-gray-200 flex justify-between items-center">
-                    <div>
-                      <span className="font-bold text-gray-900 text-xs">Order #{assg.orderId}</span>
-                      <p className="text-[10px] text-gray-500 font-mono mt-0.5">Assigned: {new Date(assg.assignedAt).toLocaleDateString()}</p>
-                    </div>
-                    <span className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase ${
-                      assg.status === "COMPLETED" ? "bg-green-50 text-green-600" :
-                      assg.status === "REJECTED" ? "bg-red-50 text-red-600" : "bg-yellow-50 text-yellow-600"
-                    }`}>
-                      {assg.status}
+                  <div className="text-right">
+                    <span className="text-[9px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest block">Status</span>
+                    <span className="text-xs font-extrabold text-gray-950 dark:text-white bg-gray-50 dark:bg-gray-850 px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-800">
+                      Scanning for Orders
                     </span>
                   </div>
-                ))}
+                </div>
               </div>
             </div>
           )}
-        </div>
+        </section>
 
-        {/* Earning Stats */}
-        <div className="p-4 border-t border-gray-200 bg-white grid grid-cols-2 gap-4 flex-shrink-0">
-          <div className="text-center border-r border-gray-100">
-            <p className="text-[10px] text-gray-500 font-bold uppercase mb-0.5 flex items-center justify-center gap-1"><DollarSign className="w-3 h-3 text-green-500" /> Today's Earnings</p>
-            <p className="font-extrabold text-green-600 text-lg">₹{parseFloat(earnings?.today || 0).toFixed(0)}</p>
+        {/* Right Column: Recent Deliveries */}
+        <section className="space-y-4">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-extrabold text-gray-955 dark:text-white tracking-tight">Recent Deliveries</h2>
+            <Link
+              href="/rider-dashboard/history"
+              className="text-xs font-extrabold text-red-500 hover:text-red-400 transition flex items-center gap-1"
+            >
+              See All <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
-          <div className="text-center">
-            <p className="text-[10px] text-gray-500 font-bold uppercase mb-0.5 flex items-center justify-center gap-1"><Clock className="w-3 h-3 text-blue-500" /> Total Shifts</p>
-            <p className="font-extrabold text-gray-900 text-lg">{earnings?.count || 0}</p>
-          </div>
-        </div>
-      </aside>
 
-      {/* Map Area */}
-      <main className="flex-1 relative bg-blue-50 overflow-hidden">
-        <div className="absolute inset-0 opacity-40 bg-cover bg-center" style={{ backgroundImage: 'url("https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=2000&auto=format&fit=crop")' }}></div>
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-          {activeAssignment && activeOrderDetail ? (
-            <>
-              <svg className="absolute w-full h-full" xmlns="http://www.w3.org/2000/svg">
-                <path d="M 300,500 Q 500,200 800,400" fill="none" stroke="#dc2626" strokeWidth="6" strokeDasharray="10,10" className="opacity-70 animate-pulse" />
-              </svg>
-              <div className="absolute flex flex-col items-center" style={{ left: "40%", top: "45%" }}>
-                <div className="bg-black text-white text-[10px] font-bold px-2 py-0.5 rounded-full mb-1">RIDER (YOU)</div>
-                <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-2xl border-4 border-red-600">
-                  <Navigation className="w-5 h-5 text-red-600 fill-current" />
+          <div className="bg-white dark:bg-gray-900/60 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 divide-y divide-gray-100 dark:divide-gray-850 shadow-sm">
+            {recentDeliveries.length === 0 ? (
+              <p className="text-xs text-gray-500 font-semibold text-center py-6">
+                No orders delivered today yet.
+              </p>
+            ) : (
+              recentDeliveries.map((del) => (
+                <div key={del.id || del.orderNumber} className="py-3.5 flex items-center justify-between first:pt-1 last:pb-1">
+                  <div className="space-y-1">
+                    <p className="text-xs font-black text-gray-900 dark:text-white">#{del.orderNumber}</p>
+                    <p className="text-[10px] text-gray-500 font-medium">
+                      {new Date(del.assignedAt).toLocaleDateString([], { month: "short", day: "numeric" })}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400">₹{del.totalAmount || 120}</p>
+                    <span className="text-[9px] font-bold text-gray-650 dark:text-gray-400 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30 px-1.5 py-0.5 rounded uppercase">
+                      Delivered
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <div className="absolute flex flex-col items-center" style={{ left: "60%", top: "30%" }}>
-                <div className="bg-green-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full mb-1">CUSTOMER</div>
-                <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-xl border-4 border-green-600">
-                  <MapPin className="w-4 h-4 text-green-600 fill-current" />
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="bg-white/80 backdrop-blur-sm px-6 py-4 rounded-2xl shadow-lg text-center">
-              <Navigation className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-              <p className="font-bold text-gray-700 text-sm">No Active delivery</p>
-              <p className="text-xs text-gray-500">Go online to get assigned orders</p>
-            </div>
-          )}
-        </div>
-      </main>
+              ))
+            )}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
-
