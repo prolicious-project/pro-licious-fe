@@ -99,3 +99,24 @@ Summary of recent debugging and fixes applied to the Rider & Vendor dashboards:
 5. Navigate to Rider Dashboard — pending orders should display with countdown timers
 6. Click "Accept" or "Reject" to test the order assignment flow
 
+
+
+
+
+
+
+
+
+
+DATABASE_URL=postgresql://postgres:9803@localhost:5432/prolicious
+NODE_ENV=development
+RAZORPAY_KEY_ID=rzp_test_SRrKIfsKje5uNq
+RAZORPAY_KEY_SECRET=KfntU4VVvNMAX64AvdhClFNd
+RAZORPAY_WEBHOOK_SECRET=BALAJI
+JWT_SECRET=22acf41ebb7d622101279e4e543489c60b05e591878a87398ab225b20d343e8a62c222abe976f737613e4c297e9b6a0b58969223b8f863b5d154d086011f3139
+JWT_REFRESH_SECRET=your-refresh-secret-min-32-chars-change-this
+REDIS_URL=redis://default:AUjZWqjdnaBIzMWFcldhgSVMOhsoWiu7@copper-weatherproof-zippy-23102.db.redis.io:15830
+PORT=5000
+FRONTEND_URL=http://localhost:3000  
+
+
