@@ -119,7 +119,7 @@ export default function VendorDashboard() {
               {chartData.length > 0 && (
                 <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
                   <h3 className="font-bold text-gray-900 text-lg mb-6">Daily Revenue Trend</h3>
-                  <div className="h-64">
+                  <div style={{ width: "100%", height: "300px", minHeight: "300px" }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <defs>
