@@ -662,16 +662,40 @@ const LeafletMap = dynamic(() => import("@/components/LeafletMap"), {
 });
 
 interface Order {
-  id: number;
-  orderId?: number;
+  // Assignment details
+  assignmentId: number;
+  riderId?: number;
+  assignmentStatus?: string; // PENDING, ASSIGNED, ACCEPTED, REJECTED, COMPLETED
+  assignedAt?: string;
+  acceptedAt?: string;
+  completedAt?: string;
+  
+  // Order details
+  id?: number;
+  orderId: number;
   orderNumber: string;
-  status: string;
+  customerId?: number;
+  vendorId?: number;
+  branchId?: number;
+  orderRiderId?: number;
+  addressId?: number;
+  subtotal?: string | number;
+  taxAmount?: string | number;
+  deliveryFee?: string | number;
+  platformFee?: string | number;
+  discountAmount?: string | number;
+  totalAmount?: string | number;
+  orderStatus?: string; // PLACED, ACCEPTED, REJECTED, PICKED_UP, DELIVERED, COMPLETED, CANCELLED
+  status?: string; // Fallback for backwards compatibility
+  paymentMethod?: string;
+  orderCreatedAt?: string;
+  orderUpdatedAt?: string;
+  
+  // Related data
+  items?: any[];
+  address?: any;
   vendor?: any;
   customer?: any;
-  address?: any;
-  assignedAt: string;
-  totalAmount?: number;
-  createdAt?: string;
 }
 
 interface Earnings {
@@ -780,7 +804,7 @@ export default function RiderDashboard() {
       let pending = ordersData.filter((o) => {
         if (!o) return false;
         
-        const status = o.status?.toUpperCase() || "UNKNOWN";
+        const status = (o.orderStatus || o.status)?.toUpperCase() || "UNKNOWN";
         const terminalStatuses = ["DELIVERED", "COMPLETED", "CANCELLED", "REJECTED"];
         return !terminalStatuses.includes(status);
       });
@@ -797,8 +821,9 @@ export default function RiderDashboard() {
         setTimers((prev) => {
           const next = { ...prev };
           pending.forEach((o) => {
-            if (!(o.id in next)) {
-              next[o.id] = 30;
+            const orderId = o.orderId || o.id;
+            if (!(orderId in next)) {
+              next[orderId] = 30;
             }
           });
           return next;
@@ -808,7 +833,7 @@ export default function RiderDashboard() {
       // Filter active order (rider already accepted, delivery in progress)
       const active = ordersData.find((o) => {
         if (!o) return false;
-        const status = o.status?.toUpperCase() || "";
+        const status = (o.orderStatus || o.status)?.toUpperCase() || "";
         const activeStatuses = ["ACCEPTED", "PICKED_UP", "ARRIVED_VENDOR", "ARRIVED_CUSTOMER", "IN_TRANSIT"];
         return activeStatuses.includes(status);
       });
@@ -819,7 +844,7 @@ export default function RiderDashboard() {
       const delivered = ordersData
         .filter((o) => {
           if (!o) return false;
-          const status = o.status?.toUpperCase() || "";
+          const status = (o.orderStatus || o.status)?.toUpperCase() || "";
           return status === "DELIVERED" || status === "COMPLETED";
         })
         .sort(
@@ -918,6 +943,20 @@ export default function RiderDashboard() {
       fetchRiderData(true); // Force refresh
     });
 
+    // Some backend implementations emit this event name when a rider is assigned
+    socket.on("rider_assigned_to_order", (data: any) => {
+      console.log("Rider assigned to order (alt event):", data);
+      playNotificationSound();
+      fetchRiderData(true);
+    });
+
+    // Older/other server variants may use a simpler event name
+    socket.on("rider_assigned", (data: any) => {
+      console.log("Rider assigned (fallback event):", data);
+      playNotificationSound();
+      fetchRiderData(true);
+    });
+
     // Pending assignments on connection
     socket.on("pending_assignments", (data: any) => {
       console.log("Pending assignments:", data);
@@ -949,6 +988,8 @@ export default function RiderDashboard() {
 
     return () => {
       socket.off("new_order_assigned");
+      socket.off("rider_assigned_to_order");
+      socket.off("rider_assigned");
       socket.off("pending_assignments");
       socket.off("order_status_changed");
       socket.off("delivery_confirmed");
@@ -991,7 +1032,7 @@ export default function RiderDashboard() {
       console.log("Accept order response:", response.data);
 
       // Remove from pending
-      setPendingOrders((prev) => prev.filter((o) => o.id !== orderId));
+      setPendingOrders((prev) => prev.filter((o) => (o.orderId || o.id) !== orderId));
       setTimers((prev) => {
         const next = { ...prev };
         delete next[orderId];
@@ -1023,7 +1064,7 @@ export default function RiderDashboard() {
       console.log("Reject order response:", response.data);
 
       // Remove from pending
-      setPendingOrders((prev) => prev.filter((o) => o.id !== orderId));
+      setPendingOrders((prev) => prev.filter((o) => (o.orderId || o.id) !== orderId));
       setTimers((prev) => {
         const next = { ...prev };
         delete next[orderId];
@@ -1031,6 +1072,23 @@ export default function RiderDashboard() {
       });
     } catch (err: any) {
       console.error("Reject order error:", err);
+      const httpStatus = err.response?.status;
+      // If endpoint missing (404) or other recoverable error, refresh rider data
+      if (httpStatus === 404) {
+        // Backend may not support explicit reject; refresh to clear stale pending
+        await fetchRiderData(true);
+        setPendingOrders((prev) => prev.filter((o) => (o.orderId || o.id) !== orderId));
+        setTimers((prev) => {
+          const next = { ...prev };
+          delete next[orderId];
+          return next;
+        });
+        alert("Action not available on server; refreshed orders.");
+        return;
+      }
+
+      const msg = err.response?.data?.message || err.message || "Failed to reject order.";
+      alert(msg);
     }
   };
 
@@ -1159,12 +1217,12 @@ export default function RiderDashboard() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {pendingOrders.map((order) => {
-              const secondsLeft = timers[order.id] ?? 30;
+              const secondsLeft = timers[order.assignmentId] ?? 30;
               const isCrit = secondsLeft < 10;
 
               return (
                 <div
-                  key={order.id}
+                  key={order.assignmentId}
                   className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md transition flex flex-col"
                 >
                   {/* Header */}
@@ -1227,13 +1285,13 @@ export default function RiderDashboard() {
                     </div>
                     <div className="flex gap-2 flex-1">
                       <button
-                        onClick={() => handleRejectOrder(order.id)}
+                        onClick={() => handleRejectOrder(order.orderId)}
                         className="flex-1 py-2 px-2 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold text-xs rounded-lg transition"
                       >
                         Pass
                       </button>
                       <button
-                        onClick={() => handleAcceptOrder(order.id)}
+                        onClick={() => handleAcceptOrder(order.orderId)}
                         className="flex-1 py-2 px-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg transition"
                       >
                         Accept
@@ -1260,14 +1318,14 @@ export default function RiderDashboard() {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-gray-200 dark:border-gray-800 mb-4">
                 <div>
                   <span className="text-xs font-bold bg-amber-100 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 px-2 py-1 rounded uppercase">
-                    {activeOrder.status}
+                    {activeOrder.orderStatus || activeOrder.status}
                   </span>
                   <h3 className="text-lg font-bold text-gray-900 dark:text-white mt-2">
                     Order #{activeOrder.orderNumber}
                   </h3>
                 </div>
                 <Link
-                  href={`/rider-dashboard/track/${activeOrder.id}`}
+                  href={`/rider-dashboard/track/${activeOrder.orderId || activeOrder.id}`}
                   className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-lg transition"
                 >
                   Live Tracking
@@ -1290,7 +1348,7 @@ export default function RiderDashboard() {
                     className="h-full bg-red-600 transition-all"
                     style={{
                       width:
-                        activeOrder.status === "PICKED_UP" ? "60%" : "40%",
+                        (activeOrder.orderStatus || activeOrder.status) === "PICKED_UP" ? "60%" : "40%",
                     }}
                   />
                 </div>
@@ -1346,7 +1404,7 @@ export default function RiderDashboard() {
               <div className="space-y-3">
                 {recentDeliveries.map((order) => (
                   <div
-                    key={order.id}
+                    key={order.orderId || order.id}
                     className="flex justify-between items-start pb-3 border-b border-gray-100 dark:border-gray-800 last:border-b-0 last:pb-0"
                   >
                     <div>
@@ -1355,7 +1413,7 @@ export default function RiderDashboard() {
                       </p>
                       <p className="text-[10px] text-gray-600 dark:text-gray-400 mt-0.5">
                         {new Date(
-                          order.assignedAt || order.createdAt || ""
+                          order.assignedAt || order.orderCreatedAt || ""
                         ).toLocaleDateString([], {
                           month: "short",
                           day: "numeric",

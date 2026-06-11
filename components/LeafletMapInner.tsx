@@ -64,6 +64,7 @@ export default function LeafletMapInner({
   return (
     <div className={className}>
       <MapContainer
+        key={JSON.stringify(centerPosition)}
         center={centerPosition}
         zoom={14}
         scrollWheelZoom={true}

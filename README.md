@@ -58,3 +58,44 @@ Create a `.env.local` file in the root of `pro-licious-fe` if your backend runs 
 NEXT_PUBLIC_API_URL=http://localhost:5000
 NEXT_PUBLIC_SOCKET_URL=http://localhost:5000
 ```
+
+## Recent Fixes (June 2026)
+
+Summary of recent debugging and fixes applied to the Rider & Vendor dashboards:
+
+### Frontend Changes
+- **Rider dashboard (`app/rider-dashboard/page.tsx`):**
+  - Fixed "Scanning for Orders" display issue where pending orders did not render
+  - Refactored `fetchRiderData()` to extract orders from multiple API response shapes
+  - Implemented smart filtering: displays non-terminal orders (excludes DELIVERED, COMPLETED, CANCELLED, REJECTED)
+  - Added safe fallback: if filter returns 0 orders but API returned data, show all orders (for demo compatibility)
+  - Improved `handleAcceptOrder()` flow: cleaner error handling, timer cleanup, data refresh, and 500ms delay before route navigation to `/rider-dashboard/track/{orderId}`
+  - Enhanced Socket.io integration with listeners for `new_order_assigned`, `pending_assignments`, `order_status_changed`, `delivery_confirmed`
+  - Fixed "Active Delivery" conditional rendering: shown when active order status is in [ACCEPTED, PICKED_UP, ARRIVED_VENDOR, ARRIVED_CUSTOMER]
+
+- **Vendor dashboard (`app/vendor-dashboard/page.tsx`):**
+  - Fixed Recharts dimension error by replacing Tailwind `h-64` class with explicit inline style `{ width: "100%", height: "300px", minHeight: "300px" }`
+  - Charts now render without negative width/height warnings
+
+### Backend Fixes
+- **Database seed script improvements:**
+  - Fixed `seed.ts` to add `.onConflictDoNothing()` for `riderAvailability` insertion to prevent duplicate key errors on repeated runs
+  
+- **New seed utility (`src/db/seed-pending-orders.ts`):**
+  - Created dedicated script to populate test data with pending rider assignments
+  - Seeded 5 orders with status `ACCEPTED` and corresponding `PENDING` rider assignments
+  - Ready for testing order accept/reject flows via `/api/rider/orders/:id/accept`
+  - Run with: `npx ts-node src/db/seed-pending-orders.ts` (after running `npm run seed`)
+
+### Root Cause Analysis
+- **404 "Assignment not found" error:** Backend endpoint `/api/rider/orders/:id/accept` queries `riderAssignments` table where `orderId = X AND riderId = rider_id`. Previous test data lacked these records.
+- **Pending orders not displaying:** Test data (11 orders) all had terminal statuses (REJECTED, COMPLETED). Filtering logic was too strict. Solution: show non-terminal orders with fallback to all orders if filter is empty.
+
+### Testing Instructions
+1. Start backend: `cd ../pro-licious-be && npm run seed && npm run dev`
+2. The seed script will create 5 pending orders with rider assignments
+3. Start frontend: `npm run dev`
+4. Login as Rider: `rider@example.com / password123`
+5. Navigate to Rider Dashboard — pending orders should display with countdown timers
+6. Click "Accept" or "Reject" to test the order assignment flow
+
