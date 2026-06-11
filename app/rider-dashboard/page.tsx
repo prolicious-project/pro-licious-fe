@@ -6,12 +6,17 @@ import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
 import { api } from "@/lib/axios";
 import { getSocket } from "@/lib/socket";
-import { Navigation, Phone, CheckCircle, MapPin, AlertCircle, Package, Clock, DollarSign } from "lucide-react";
+import dynamic from "next/dynamic";
+import { Navigation, Phone, CheckCircle, MapPin, AlertCircle, Package, Clock, DollarSign, X } from "lucide-react";
+
+const TrackingMap = dynamic(() => import("@/components/TrackingMap"), { ssr: false });
 
 export default function RiderDashboard() {
   const router = useRouter();
   const { isAuthenticated, user, token } = useSelector((state: RootState) => state.auth);
   const [isOnline, setIsOnline] = useState(false);
+  const [riderId, setRiderId] = useState<number | null>(null);
+  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number }>({ lat: 17.4483, lng: 78.3488 });
   const [assignments, setAssignments] = useState<any[]>([]);
   const [activeAssignment, setActiveAssignment] = useState<any>(null);
   const [activeOrderDetail, setActiveOrderDetail] = useState<any>(null);
@@ -19,6 +24,11 @@ export default function RiderDashboard() {
   const [loading, setLoading] = useState(true);
   const [otpInput, setOtpInput] = useState("");
   const [otpError, setOtpError] = useState("");
+  
+  // Real-time Chat states
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [chatInput, setChatInput] = useState("");
 
   const fetchRiderData = async () => {
     try {
@@ -66,12 +76,152 @@ export default function RiderDashboard() {
 
   const toggleOnline = async () => {
     try {
-      await api.patch("/api/rider/availability", { isOnline: !isOnline });
-      setIsOnline(prev => !prev);
+      const nextOnline = !isOnline;
+      await api.patch("/api/rider/availability", { isOnline: nextOnline });
+      setIsOnline(nextOnline);
+      
+      const socket = getSocket(token || undefined);
+      if (!socket.connected) socket.connect();
+      
+      if (riderId) {
+        if (nextOnline) {
+          socket.emit("rider_go_online", { riderId });
+        } else {
+          socket.emit("rider_go_offline", { riderId });
+        }
+      }
     } catch (e) {
       console.error(e);
     }
   };
+
+  // Sync messaging sockets inside order room
+  useEffect(() => {
+    if (!isAuthenticated || !activeAssignment || activeAssignment.status !== "ACCEPTED") return;
+
+    const socket = getSocket(token || undefined);
+    if (!socket.connected) socket.connect();
+
+    socket.emit("join_order_room", {
+      orderId: activeAssignment.orderId,
+      userId: user?.id || 1,
+      role: "RIDER"
+    });
+
+    socket.on("new_message", (data: any) => {
+      setChatMessages((prev) => {
+        if (prev.find((m) => m.id === data.id)) return prev;
+        return [...prev, data];
+      });
+    });
+
+    return () => {
+      socket.off("new_message");
+    };
+  }, [isAuthenticated, activeAssignment, token, user]);
+
+  const openChat = async () => {
+    if (!activeAssignment) return;
+    try {
+      const res = await api.get(`/api/rider/orders/${activeAssignment.orderId}/messages`);
+      setChatMessages(res.data?.data || []);
+      setIsChatOpen(true);
+    } catch (e) {
+      console.error("Error loading chat messages:", e);
+    }
+  };
+
+  const sendChatMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim() || !activeAssignment) return;
+    try {
+      const socket = getSocket(token || undefined);
+      socket.emit("send_message", {
+        orderId: activeAssignment.orderId,
+        senderId: user?.id || 1,
+        message: chatInput.trim()
+      });
+      setChatInput("");
+    } catch (err) {
+      console.error("Error sending chat:", err);
+    }
+  };
+
+  // Load availability status on mount
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    
+    const fetchAvailability = async () => {
+      try {
+        const res = await api.get("/api/rider/availability");
+        const av = res.data?.data;
+        if (av) {
+          setIsOnline(av.isOnline);
+          setRiderId(av.riderId);
+          
+          const socket = getSocket(token || undefined);
+          if (!socket.connected) socket.connect();
+          if (av.isOnline) {
+            socket.emit("rider_go_online", { riderId: av.riderId });
+          }
+        }
+      } catch (e) {
+        console.error("Error loading availability:", e);
+      }
+    };
+    
+    fetchAvailability();
+  }, [isAuthenticated, token]);
+
+  // Synchronize socket and geolocation watch
+  useEffect(() => {
+    if (!isAuthenticated || !isOnline || !activeAssignment || activeAssignment.status !== "ACCEPTED" || !activeOrderDetail) return;
+
+    const orderStatus = activeOrderDetail.order?.status;
+    if (!["RIDER_ASSIGNED", "ARRIVED_VENDOR", "PICKED_UP", "ARRIVED_CUSTOMER"].includes(orderStatus)) return;
+
+    const socket = getSocket(token || undefined);
+    if (!socket.connected) socket.connect();
+
+    const handleSuccess = (position: GeolocationPosition) => {
+      const { latitude, longitude } = position.coords;
+      setCurrentLocation({ lat: latitude, lng: longitude });
+      
+      socket.emit("rider_location_update", {
+        orderId: activeAssignment.orderId,
+        riderId: activeAssignment.riderId || riderId,
+        latitude,
+        longitude
+      });
+      
+      // Update DB location as fallback
+      api.post("/api/rider/location", {
+        orderId: activeAssignment.orderId,
+        latitude,
+        longitude
+      }).catch(console.error);
+    };
+
+    const handleError = (error: GeolocationPositionError) => {
+      console.warn("Rider geolocation watch error:", error.message);
+    };
+
+    // Get current position initially
+    navigator.geolocation.getCurrentPosition(handleSuccess, handleError, {
+      enableHighAccuracy: true
+    });
+
+    // Start watching
+    const watchId = navigator.geolocation.watchPosition(handleSuccess, handleError, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0
+    });
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, [isAuthenticated, isOnline, activeAssignment, activeOrderDetail, token, riderId]);
 
   const handleAcceptAssignment = async (orderId: number) => {
     try {
@@ -279,6 +429,12 @@ export default function RiderDashboard() {
                         <a href={`tel:${activeOrderDetail?.address?.phone || "9999999999"}`} className="flex-1 bg-white border border-gray-200 py-2 rounded-lg font-bold text-xs text-gray-700 flex items-center justify-center gap-1.5 hover:bg-gray-50 transition-colors">
                           <Phone className="w-3.5 h-3.5" /> Call Customer
                         </a>
+                        <button 
+                          onClick={openChat}
+                          className="flex-1 bg-red-50 hover:bg-red-155 border border-red-100 py-2 rounded-lg font-bold text-xs text-red-600 flex items-center justify-center gap-1.5 hover:bg-red-100 transition-colors"
+                        >
+                          💬 Chat with Customer
+                        </button>
                       </div>
                     </div>
                   )}
@@ -325,36 +481,113 @@ export default function RiderDashboard() {
       </aside>
 
       {/* Map Area */}
-      <main className="flex-1 relative bg-blue-50 overflow-hidden">
-        <div className="absolute inset-0 opacity-40 bg-cover bg-center" style={{ backgroundImage: 'url("https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=2000&auto=format&fit=crop")' }}></div>
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-          {activeAssignment && activeOrderDetail ? (
-            <>
-              <svg className="absolute w-full h-full" xmlns="http://www.w3.org/2000/svg">
-                <path d="M 300,500 Q 500,200 800,400" fill="none" stroke="#dc2626" strokeWidth="6" strokeDasharray="10,10" className="opacity-70 animate-pulse" />
-              </svg>
-              <div className="absolute flex flex-col items-center" style={{ left: "40%", top: "45%" }}>
-                <div className="bg-black text-white text-[10px] font-bold px-2 py-0.5 rounded-full mb-1">RIDER (YOU)</div>
-                <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-2xl border-4 border-red-600">
-                  <Navigation className="w-5 h-5 text-red-600 fill-current" />
-                </div>
+      {(() => {
+        const activeOrderState = activeOrderDetail?.order?.status || "RIDER_ASSIGNED";
+        const riderMapNode = activeAssignment && activeOrderDetail ? {
+          orderId: activeAssignment.orderId,
+          orderNumber: activeOrderDetail.order?.orderNumber || "ORDER",
+          riderName: user?.name || "Rider",
+          riderPhone: user?.phone || "N/A",
+          vendorName: activeOrderDetail.order?.vendorName || `Vendor #${activeOrderDetail.order?.vendorId}`,
+          customerName: `Customer #${activeOrderDetail.order?.customerId}`,
+          status: activeOrderState,
+          progress: (getOrderStageIndex(activeOrderState) + 1) * 20,
+          start: {
+            lat: activeOrderDetail.branch?.latitude ? parseFloat(activeOrderDetail.branch.latitude) : 17.4483,
+            lng: activeOrderDetail.branch?.longitude ? parseFloat(activeOrderDetail.branch.longitude) : 78.3488
+          },
+          end: {
+            lat: activeOrderDetail.address?.latitude ? parseFloat(activeOrderDetail.address.latitude) : 17.4325,
+            lng: activeOrderDetail.address?.longitude ? parseFloat(activeOrderDetail.address.longitude) : 78.4071
+          },
+          current: currentLocation
+        } : null;
+
+        return (
+          <main className="flex-1 relative bg-gray-50 overflow-hidden">
+            {activeAssignment && activeOrderDetail && riderMapNode ? (
+              <TrackingMap nodes={[riderMapNode]} trackedOrderId={activeAssignment.orderId} />
+            ) : (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-50 text-center p-6">
+                <Navigation className="w-8 h-8 text-zinc-300 mx-auto mb-3 animate-pulse" />
+                <p className="font-extrabold text-zinc-855 text-sm">No Active Delivery</p>
+                <p className="text-xs text-zinc-400 mt-1">Assignments will appear here once accepted. Make sure you are Online.</p>
               </div>
-              <div className="absolute flex flex-col items-center" style={{ left: "60%", top: "30%" }}>
-                <div className="bg-green-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full mb-1">CUSTOMER</div>
-                <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-xl border-4 border-green-600">
-                  <MapPin className="w-4 h-4 text-green-600 fill-current" />
-                </div>
+            )}
+          </main>
+        );
+      })()}
+
+      {/* Real-time Customer Chat Drawer/Modal */}
+      {isChatOpen && activeAssignment && (
+        <div className="fixed inset-0 z-50 bg-black/55 flex items-end md:items-center md:justify-center p-0 md:p-4">
+          <div className="bg-white w-full md:max-w-md h-[80vh] md:h-[600px] rounded-t-3xl md:rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="p-5 bg-red-650 text-white flex justify-between items-center flex-shrink-0">
+              <div>
+                <h4 className="font-extrabold text-base">Chat with Customer</h4>
+                <p className="text-[10px] text-red-200 font-bold uppercase tracking-wider mt-0.5">Order #{activeOrderDetail?.order?.orderNumber}</p>
               </div>
-            </>
-          ) : (
-            <div className="bg-white/80 backdrop-blur-sm px-6 py-4 rounded-2xl shadow-lg text-center">
-              <Navigation className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-              <p className="font-bold text-gray-700 text-sm">No Active delivery</p>
-              <p className="text-xs text-gray-500">Go online to get assigned orders</p>
+              <button 
+                onClick={() => setIsChatOpen(false)}
+                className="p-1.5 hover:bg-white/10 rounded-full text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
-          )}
+
+            {/* Message list */}
+            <div className="flex-grow p-4 overflow-y-auto bg-zinc-50 flex flex-col gap-3">
+              {chatMessages.length === 0 ? (
+                <div className="text-center py-10 text-gray-400 text-xs flex flex-col items-center justify-center gap-1.5 my-auto">
+                  <span className="text-3xl">💬</span>
+                  <p className="font-extrabold text-zinc-700">No messages yet</p>
+                  <p className="text-[10px] text-zinc-400 max-w-[200px]">Say hello to the customer to coordinate delivery!</p>
+                </div>
+              ) : (
+                chatMessages.map((msg: any) => {
+                  const isMe = msg.senderId === user?.id;
+                  return (
+                    <div 
+                      key={msg.id}
+                      className={`flex flex-col max-w-[75%] ${isMe ? "self-end items-end" : "self-start items-start"}`}
+                    >
+                      <div className={`px-4 py-2.5 rounded-2xl text-xs font-medium shadow-xs leading-relaxed ${
+                        isMe 
+                          ? "bg-red-600 text-white rounded-tr-none" 
+                          : "bg-white text-zinc-800 border border-zinc-200 rounded-tl-none"
+                      }`}>
+                        {msg.message}
+                      </div>
+                      <span className="text-[8px] text-gray-400 mt-1 font-mono">
+                        {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Input field */}
+            <form onSubmit={sendChatMessage} className="p-4 bg-white border-t border-gray-150 flex gap-2.5 items-center flex-shrink-0">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Type your message here..."
+                className="flex-grow bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2.5 text-xs outline-none focus:bg-white focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all font-medium"
+              />
+              <button 
+                type="submit"
+                disabled={!chatInput.trim()}
+                className="bg-red-650 hover:bg-red-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm flex-shrink-0"
+              >
+                Send
+              </button>
+            </form>
+          </div>
         </div>
-      </main>
+      )}
     </div>
   );
 }

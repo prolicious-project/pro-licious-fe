@@ -2,17 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Store, Truck, Users, Activity, AlertTriangle, ShieldCheck, Settings, FileText, LogOut } from "lucide-react";
+import { LayoutDashboard, Store, Truck, Users, Activity, AlertTriangle, ShieldCheck, Settings, FileText, LogOut, Navigation, IndianRupee } from "lucide-react";
 import { useDispatch } from "react-redux";
 import { logout } from "@/store/slices/authSlice";
 import { useRouter } from "next/navigation";
 
 const NAV_ITEMS = [
   { label: "Platform", type: "header" as const },
-  { href: "/admin-dashboard", icon: LayoutDashboard, label: "Live Overview" },
+  { href: "/admin-dashboard", icon: LayoutDashboard, label: "Live Dashboard" },
   { href: "/admin-dashboard/orders", icon: FileText, label: "Orders" },
   { href: "/admin-dashboard/vendors", icon: Store, label: "Vendors" },
   { href: "/admin-dashboard/riders", icon: Truck, label: "Riders" },
+  { href: "/admin-dashboard/rider-livetracking", icon: Navigation, label: "Rider Tracking" },
+  { href: "/admin-dashboard/payments", icon: IndianRupee, label: "Payments" },
   { label: "System", type: "header" as const },
   { href: "/admin-dashboard/analytics", icon: Activity, label: "Analytics" },
   { href: "/admin-dashboard/tickets", icon: AlertTriangle, label: "Tickets" },

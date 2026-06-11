@@ -37,6 +37,14 @@ export default function AdminRidersPage() {
   useEffect(() => {
     if (!isAuthenticated) { router.push("/login"); return; }
     fetchRiders();
+
+    const interval = setInterval(() => {
+      api.get("/api/admin/riders")
+        .then((res) => setRiders(res.data?.data || []))
+        .catch((e) => console.error("Error polling riders:", e));
+    }, 1000);
+
+    return () => clearInterval(interval);
   }, [isAuthenticated, router]);
 
   const handleUpdateStatus = async (riderId: number, status: string) => {

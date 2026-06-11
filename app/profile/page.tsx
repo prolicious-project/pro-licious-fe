@@ -42,8 +42,9 @@ export default function ProfilePage() {
       
       setAddresses(addrRes.data?.data || []);
       setNotifications(notifRes.data?.data || []);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Error fetching profile data:", e);
+      setError(e.response?.data?.message || "Failed to load profile. Make sure you are logged in as a Customer.");
     } finally {
       setLoading(false);
     }

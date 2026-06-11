@@ -44,6 +44,14 @@ export default function AdminVendorsPage() {
   useEffect(() => {
     if (!isAuthenticated) { router.push("/login"); return; }
     fetchVendors();
+
+    const interval = setInterval(() => {
+      api.get("/api/admin/vendors")
+        .then((res) => setVendors(res.data?.data || []))
+        .catch((e) => console.error("Error polling vendors:", e));
+    }, 1000);
+
+    return () => clearInterval(interval);
   }, [isAuthenticated, router]);
 
   const handleUpdateStatus = async (vendorId: number, status: string) => {

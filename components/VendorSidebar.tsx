@@ -11,7 +11,8 @@ const NAV_ITEMS = [
   { href: "/vendor-dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { href: "/vendor-dashboard/orders", icon: ShoppingBag, label: "Orders" },
   { href: "/vendor-dashboard/menu", icon: Menu, label: "Menu" },
-  { href: "/vendor-dashboard/settlements", icon: Wallet, label: "Settlements" },
+  { href: "/vendor-dashboard/revenue", icon: BarChart3, label: "Revenue" },
+  { href: "/vendor-dashboard/transactions", icon: Wallet, label: "Transactions" },
   { href: "/vendor-dashboard/settings", icon: Settings, label: "Settings" },
 ];
 

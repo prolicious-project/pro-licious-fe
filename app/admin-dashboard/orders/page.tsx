@@ -38,6 +38,15 @@ export default function AdminOrdersPage() {
   useEffect(() => {
     if (!isAuthenticated) { router.push("/login"); return; }
     fetchOrders(selectedStatus);
+
+    const interval = setInterval(() => {
+      const params = selectedStatus !== "ALL" ? { status: selectedStatus } : {};
+      api.get("/api/admin/orders", { params })
+        .then((res) => setOrders(res.data?.data || []))
+        .catch((e) => console.error("Error polling admin orders:", e));
+    }, 1000);
+
+    return () => clearInterval(interval);
   }, [isAuthenticated, selectedStatus, router]);
 
   const handleViewDetail = async (orderId: number) => {
