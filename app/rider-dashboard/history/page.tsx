@@ -58,6 +58,8 @@ export default function OrderHistory() {
       for (const o of raw) {
         const key = o.orderId || o.id;
         if (!key) continue;
+        // Keep the latest/most recent assignment (raw is sorted by assignedAt DESC)
+        if (seen.has(key)) continue;
         seen.set(key, {
           id: key,
           orderNumber: o.orderNumber || String(key),
@@ -92,7 +94,7 @@ export default function OrderHistory() {
 
       // 2. Status Filter
       if (statusFilter !== "ALL") {
-        if (statusFilter === "COMPLETED" && o.status !== "DELIVERED") return false;
+        if (statusFilter === "COMPLETED" && o.status !== "DELIVERED" && o.status !== "COMPLETED") return false;
         if (statusFilter === "REJECTED" && o.status !== "REJECTED") return false;
         if (statusFilter === "CANCELLED" && o.status !== "CANCELLED") return false;
       }
@@ -130,11 +132,12 @@ export default function OrderHistory() {
   const getStatusStyle = (status: string) => {
     switch (status) {
       case "DELIVERED":
+      case "COMPLETED":
         return "bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30 text-emerald-600 dark:text-emerald-400";
       case "REJECTED":
         return "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 text-red-655 dark:text-red-405";
       case "CANCELLED":
-        return "bg-gray-100 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700/30 text-gray-505";
+        return "bg-gray-100 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700/30 text-gray-550";
       default:
         return "bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 text-amber-600 dark:text-amber-400";
     }

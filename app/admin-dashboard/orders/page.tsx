@@ -71,7 +71,8 @@ export default function AdminOrdersPage() {
   const filteredOrders = orders.filter(o => 
     o.orderNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
     String(o.customerId).includes(searchQuery) ||
-    String(o.vendorId).includes(searchQuery)
+    String(o.vendorId).includes(searchQuery) ||
+    (o.riderId && String(o.riderId).includes(searchQuery))
   );
 
   return (
@@ -132,6 +133,7 @@ export default function AdminOrdersPage() {
                     <th className="px-6 py-4">Order #</th>
                     <th className="px-6 py-4">Customer ID</th>
                     <th className="px-6 py-4">Vendor ID</th>
+                    <th className="px-6 py-4">Rider ID</th>
                     <th className="px-6 py-4">Total Amount</th>
                     <th className="px-6 py-4">Status</th>
                     <th className="px-6 py-4">Date</th>
@@ -147,6 +149,9 @@ export default function AdminOrdersPage() {
                       <td className="px-6 py-4 font-bold text-red-600">{order.orderNumber}</td>
                       <td className="px-6 py-4 text-gray-900 font-bold">#CU-{order.customerId}</td>
                       <td className="px-6 py-4 text-gray-900 font-bold">#VD-{order.vendorId}</td>
+                      <td className="px-6 py-4 text-gray-900 font-bold">
+                        {order.riderId ? `#RD-${order.riderId}` : "Unassigned"}
+                      </td>
                       <td className="px-6 py-4 font-bold text-gray-900">₹{parseFloat(order.totalAmount).toFixed(2)}</td>
                       <td className="px-6 py-4">
                         <OrderStatusBadge status={order.status} />
