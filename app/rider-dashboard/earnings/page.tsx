@@ -56,14 +56,21 @@ export default function EarningsDashboard() {
       ]);
 
       const rawOrders = listRes.data?.data || [];
+      // Deduplicate by orderId before mapping
+      const seenIds = new Set<number>();
       const formatted: EarningsRecord[] = rawOrders
-        .filter((o: any) => o.status === "DELIVERED")
+        .filter((o: any) => {
+          const oid = o.orderId || o.id;
+          if (seenIds.has(oid)) return false;
+          seenIds.add(oid);
+          return o.orderStatus === "DELIVERED" || o.status === "DELIVERED";
+        })
         .map((o: any) => ({
-          id: o.id,
+          id: o.orderId || o.id,
           orderNumber: o.orderNumber,
           vendorName: o.vendor?.name || "Pro-Licious Kitchen",
           amount: o.totalAmount || 120,
-          date: new Date(o.assignedAt).toISOString().split("T")[0],
+          date: new Date(o.assignedAt || o.orderCreatedAt).toISOString().split("T")[0],
           status: "PAID",
         }));
 
@@ -287,8 +294,8 @@ export default function EarningsDashboard() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-850/30 transition">
+                filtered.map((item, idx) => (
+                  <tr key={`earn-${item.id ?? idx}-${idx}`} className="hover:bg-gray-50 dark:hover:bg-gray-850/30 transition">
                     <td className="py-3.5">{item.date}</td>
                     <td className="py-3.5 text-gray-950 dark:text-white font-bold">#{item.orderNumber}</td>
                     <td className="py-3.5 text-gray-700 dark:text-gray-300">{item.vendorName}</td>

@@ -632,6 +632,7 @@ import { useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
 import { api } from "@/lib/axios";
+import { riderApi } from "@/services/api";
 import { getSocket } from "@/lib/socket";
 import {
   TrendingUp,
@@ -794,11 +795,25 @@ export default function RiderDashboard() {
         ordersData = Array.isArray(ordersRes.data.result) ? ordersRes.data.result : [];
       }
 
+      // Deduplicate ordersData by orderId (API may return multiple assignment rows per order)
+      // Keep the last entry per orderId (most recent assignment takes precedence)
+      const orderMap = new Map<number, Order>();
+      for (const o of ordersData) {
+        const key = o.orderId || o.id || 0;
+        orderMap.set(key, o);
+      }
+      ordersData = Array.from(orderMap.values());
+
       const earningsData = earningsRes.data?.data || earningsRes.data || {};
 
       // Update all orders
       setAllOrders(ordersData);
       setEarnings(earningsData);
+
+      // Initialize isOnline state from earnings summary
+      if (earningsData && typeof earningsData.isOnline === "boolean") {
+        setIsOnline(earningsData.isOnline);
+      }
 
       // Filter pending orders - show all orders except those marked as DELIVERED, COMPLETED, CANCELLED, or REJECTED
       let pending = ordersData.filter((o) => {
@@ -821,9 +836,9 @@ export default function RiderDashboard() {
         setTimers((prev) => {
           const next = { ...prev };
           pending.forEach((o) => {
-            const orderId = o.orderId || o.id;
-            if (!(orderId in next)) {
-              next[orderId] = 30;
+            const id = o.orderId || o.id;
+            if (id && !(id in next)) {
+              next[id] = 30;
             }
           });
           return next;
@@ -840,7 +855,8 @@ export default function RiderDashboard() {
       console.log("Active order:", active);
       setActiveOrder(active || null);
 
-      // Filter recent deliveries (terminal successful states)
+      // Filter recent deliveries (terminal successful states), deduplicated by orderId
+      const seenOrderIds = new Set<number>();
       const delivered = ordersData
         .filter((o) => {
           if (!o) return false;
@@ -849,9 +865,15 @@ export default function RiderDashboard() {
         })
         .sort(
           (a, b) =>
-            new Date(b.assignedAt || b.createdAt || 0).getTime() -
-            new Date(a.assignedAt || a.createdAt || 0).getTime()
+            new Date(b.assignedAt || 0).getTime() -
+            new Date(a.assignedAt || 0).getTime()
         )
+        .filter((o) => {
+          const key = o.orderId || o.id || 0;
+          if (seenOrderIds.has(key)) return false;
+          seenOrderIds.add(key);
+          return true;
+        })
         .slice(0, 5);
       console.log("Recent deliveries:", delivered);
       setRecentDeliveries(delivered);
@@ -862,6 +884,29 @@ export default function RiderDashboard() {
       setError(errorMsg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ============ HANDLE TOGGLE AVAILABILITY ============
+  const handleToggleAvailability = async () => {
+    try {
+      const nextOnline = !isOnline;
+      await riderApi.toggleAvailability(nextOnline);
+      setIsOnline(nextOnline);
+
+      // Sync via Socket.io
+      const socket = socketRef.current;
+      if (socket && socket.connected) {
+        if (nextOnline) {
+          socket.emit("rider_go_online", { riderId: user?.id ? Number(user.id) : undefined });
+        } else {
+          socket.emit("rider_go_offline", { riderId: user?.id ? Number(user.id) : undefined });
+        }
+      }
+    } catch (err: any) {
+      console.error("Failed to toggle availability:", err);
+      const msg = err.response?.data?.message || "Failed to update availability status.";
+      alert(msg);
     }
   };
 
@@ -1026,10 +1071,11 @@ export default function RiderDashboard() {
   }, []);
 
   // ============ HANDLE ACCEPT ORDER ============
+  // ============ HANDLE ACCEPT ORDER ============
   const handleAcceptOrder = async (orderId: number) => {
     try {
-      const response = await api.patch(`/api/rider/orders/${orderId}/accept`);
-      console.log("Accept order response:", response.data);
+      await riderApi.acceptOrder(orderId);
+      console.log("Accept order successful");
 
       // Remove from pending
       setPendingOrders((prev) => prev.filter((o) => (o.orderId || o.id) !== orderId));
@@ -1060,8 +1106,8 @@ export default function RiderDashboard() {
   // ============ HANDLE REJECT ORDER ============
   const handleRejectOrder = async (orderId: number) => {
     try {
-      const response = await api.patch(`/api/rider/orders/${orderId}/reject`);
-      console.log("Reject order response:", response.data);
+      await riderApi.rejectOrder(orderId);
+      console.log("Reject order successful");
 
       // Remove from pending
       setPendingOrders((prev) => prev.filter((o) => (o.orderId || o.id) !== orderId));
@@ -1150,9 +1196,23 @@ export default function RiderDashboard() {
             Keep the screen active to receive order alerts instantly.
           </p>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 text-xs font-bold uppercase">
-          <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse" />
-          Live Connected
+        <div className="flex flex-wrap items-center gap-4">
+          <button
+            onClick={handleToggleAvailability}
+            className={`px-4 py-2.5 rounded-xl text-xs font-extrabold uppercase transition-all flex items-center gap-2 border shadow-sm cursor-pointer ${
+              isOnline
+                ? "bg-emerald-600 border-emerald-500 hover:bg-emerald-700 text-white"
+                : "bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300"
+            }`}
+          >
+            <span className={`w-2.5 h-2.5 rounded-full ${isOnline ? "bg-white animate-pulse" : "bg-gray-400 dark:bg-gray-600"}`} />
+            {isOnline ? "Go Offline" : "Go Online"}
+          </button>
+          
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 text-xs font-bold uppercase">
+            <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse" />
+            Live Connected
+          </div>
         </div>
       </div>
 
@@ -1216,13 +1276,13 @@ export default function RiderDashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {pendingOrders.map((order) => {
-              const secondsLeft = timers[order.assignmentId] ?? 30;
+            {pendingOrders.map((order, idx) => {
+              const secondsLeft = timers[order.orderId || order.assignmentId] ?? 30;
               const isCrit = secondsLeft < 10;
 
               return (
                 <div
-                  key={order.assignmentId}
+                  key={`pending-${order.assignmentId || order.orderId || idx}-${idx}`}
                   className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md transition flex flex-col"
                 >
                   {/* Header */}
@@ -1402,9 +1462,9 @@ export default function RiderDashboard() {
               </p>
             ) : (
               <div className="space-y-3">
-                {recentDeliveries.map((order) => (
+                {Array.from(new Map(recentDeliveries.map(o => [o.orderId || o.id, o])).values()).map((order, idx) => (
                   <div
-                    key={order.orderId || order.id}
+                    key={`delivery-${order.orderId || order.id || idx}-${idx}`}
                     className="flex justify-between items-start pb-3 border-b border-gray-100 dark:border-gray-800 last:border-b-0 last:pb-0"
                   >
                     <div>

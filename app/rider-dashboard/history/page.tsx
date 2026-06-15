@@ -52,7 +52,24 @@ export default function OrderHistory() {
     try {
       setLoading(true);
       const res = await api.get("/api/rider/orders");
-      setOrders(res.data?.data || []);
+      const raw: any[] = res.data?.data || [];
+      // Deduplicate by orderId (API returns orderId, not id)
+      const seen = new Map<number | string, Order>();
+      for (const o of raw) {
+        const key = o.orderId || o.id;
+        if (!key) continue;
+        seen.set(key, {
+          id: key,
+          orderNumber: o.orderNumber || String(key),
+          status: o.orderStatus || o.status || "UNKNOWN",
+          assignedAt: o.assignedAt || o.orderCreatedAt || new Date().toISOString(),
+          totalAmount: o.totalAmount || o.orderTotal,
+          items: o.items,
+          vendor: o.vendor,
+          address: o.address,
+        });
+      }
+      setOrders(Array.from(seen.values()));
     } catch (err) {
       console.error("Order history load error:", err);
     } finally {
@@ -205,9 +222,9 @@ export default function OrderHistory() {
         </div>
       ) : viewMode === "GRID" ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map((order) => (
+          {filtered.map((order, idx) => (
             <div
-              key={order.id}
+              key={`hist-${order.id}-${idx}`}
               onClick={() => setSelectedOrder(order)}
               className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-5 hover:border-gray-300 dark:hover:border-gray-700 transition cursor-pointer flex flex-col justify-between space-y-4"
             >
@@ -255,9 +272,9 @@ export default function OrderHistory() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-850">
-                {filtered.map((order) => (
+                {filtered.map((order, idx) => (
                   <tr
-                    key={order.id}
+                    key={`hist-${order.id}-${idx}`}
                     onClick={() => setSelectedOrder(order)}
                     className="hover:bg-gray-50 dark:hover:bg-gray-850/20 cursor-pointer transition animate-fade-in"
                   >

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
 import { api } from "@/lib/axios";
+import { riderApi } from "@/services/api";
 import { getSocket } from "@/lib/socket";
 import LeafletMap from "@/components/LeafletMap";
 import {
@@ -15,6 +16,10 @@ import {
   ArrowLeft,
   ChevronRight,
   ShieldCheck,
+  AlertCircle,
+  Loader,
+  Package,
+  DollarSign,
 } from "lucide-react";
 
 interface OrderDetail {
@@ -22,7 +27,18 @@ interface OrderDetail {
   orderNumber: string;
   status: string;
   totalAmount: number;
-  items: any[];
+  subtotal?: number;
+  taxAmount?: number;
+  deliveryFee?: number;
+  platformFee?: number;
+  discountAmount?: number;
+  items: Array<{
+    id: number;
+    name: string;
+    quantity: number;
+    price: number;
+    specialInstructions?: string;
+  }>;
   vendor?: {
     id: number;
     name: string;
@@ -30,16 +46,20 @@ interface OrderDetail {
     latitude: number;
     longitude: number;
     phone: string;
+    image?: string;
   };
   customer?: {
     name: string;
     phone: string;
+    email?: string;
   };
+
   address?: {
     streetAddress: string;
     city: string;
     latitude: number;
     longitude: number;
+    zipCode?: string;
   };
 }
 
@@ -58,6 +78,7 @@ export default function OrderTrackingPage() {
   const [distance, setDistance] = useState<number | null>(null);
 
   const watchIdRef = useRef<number | null>(null);
+  const lastLocationSyncRef = useRef<number>(0);
 
   // Haversine formula to compute distance in km
   const getHaversineDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -78,18 +99,21 @@ export default function OrderTrackingPage() {
     try {
       setLoading(true);
       setError("");
-      // Get all assignments and find this specific order to be safe & compatible
-      const res = await api.get("/api/rider/orders");
-      const orders: OrderDetail[] = res.data?.data || [];
-      const current = orders.find((o) => o.id === Number(orderId));
+      const orderId = Number(params.orderId);
+      
+      // Get all assignments and find this specific order to ensure compatibility
+      const res = await riderApi.getOrderById(orderId);
+      const current = res.data?.data;
+      
       if (!current) {
         setError("Order not found or not assigned to you.");
         return;
       }
       setOrder(current);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Fetch order error:", err);
-      setError("Failed to fetch order details.");
+      const errorMsg = err.response?.data?.message || "Failed to fetch order details.";
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -105,15 +129,25 @@ export default function OrderTrackingPage() {
         (pos) => {
           const { latitude, longitude } = pos.coords;
           setRiderCoords([latitude, longitude]);
-          // Sync location to backend
-          api.post("/api/rider/location", { latitude, longitude }).catch((e) => {
-            console.warn("Failed to update rider coordinates:", e);
-          });
+          
+          // Sync location to backend (throttled to at most once every 15 seconds)
+          const now = Date.now();
+          if (now - lastLocationSyncRef.current >= 15000) {
+            lastLocationSyncRef.current = now;
+            riderApi.updateLocation({
+              orderId: Number(params.orderId),
+              latitude,
+              longitude,
+            }).catch((e) => {
+              console.warn("Failed to update rider coordinates:", e);
+            });
+          }
+          
           // Broadcast via socket
           const socket = getSocket(token || "");
           if (socket.connected) {
             socket.emit("rider_location_update", {
-              orderId: Number(orderId),
+              orderId: Number(params.orderId),
               latitude,
               longitude,
             });
@@ -131,7 +165,7 @@ export default function OrderTrackingPage() {
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
     };
-  }, [isAuthenticated, orderId]);
+  }, [isAuthenticated, params.orderId, token]);
 
   // Compute distance and ETA
   useEffect(() => {
@@ -179,22 +213,25 @@ export default function OrderTrackingPage() {
 
   const handleUpdateStatus = async (nextStatus: string) => {
     try {
+      const id = Number(params.orderId);
+      
       if (nextStatus === "ARRIVED_VENDOR") {
-        await api.patch(`/api/rider/orders/${orderId}/arrived-vendor`);
+        await riderApi.arrivedVendor(id);
       } else if (nextStatus === "PICKED_UP") {
-        await api.patch(`/api/rider/orders/${orderId}/picked-up`);
+        await riderApi.pickedUp(id);
       } else if (nextStatus === "ARRIVED_CUSTOMER") {
-        await api.patch(`/api/rider/orders/${orderId}/arrived-customer`);
+        await riderApi.arrivedCustomer(id);
       } else if (nextStatus === "DELIVERED") {
-        await api.post(`/api/rider/orders/${orderId}/deliver`, { otp: otpInput });
+        await riderApi.deliverOrder(id, otpInput);
       }
-      fetchOrderDetails();
-      if (nextStatus === "DELIVERED") {
-        router.push("/rider-dashboard");
-      }
+      
+      // Await refresh so UI updates to show current status (e.g. Delivery Completed banner)
+      await fetchOrderDetails();
+      // Do NOT auto-navigate — rider sees the "Delivery Completed" state and taps Back when ready
     } catch (err: any) {
       console.error("Status update error:", err);
-      alert(err.response?.data?.message || "Failed to update order status.");
+      const errorMsg = err.response?.data?.message || "Failed to update order status.";
+      alert(errorMsg);
     }
   };
 
@@ -221,7 +258,7 @@ export default function OrderTrackingPage() {
   }
 
   const steps = [
-    { label: "Accepted", active: ["ACCEPTED", "ARRIVED_VENDOR", "PICKED_UP", "ARRIVED_CUSTOMER", "DELIVERED"].includes(order.status) },
+    { label: "Accepted", active: ["RIDER_ASSIGNED", "ACCEPTED", "ARRIVED_VENDOR", "PICKED_UP", "ARRIVED_CUSTOMER", "DELIVERED"].includes(order.status) },
     { label: "Arrived Vendor", active: ["ARRIVED_VENDOR", "PICKED_UP", "ARRIVED_CUSTOMER", "DELIVERED"].includes(order.status) },
     { label: "Picked Up", active: ["PICKED_UP", "ARRIVED_CUSTOMER", "DELIVERED"].includes(order.status) },
     { label: "Arrived Customer", active: ["ARRIVED_CUSTOMER", "DELIVERED"].includes(order.status) },
@@ -229,183 +266,346 @@ export default function OrderTrackingPage() {
   ];
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-7xl mx-auto h-[calc(100vh-140px)]">
-      {/* Map Column */}
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 max-w-7xl mx-auto h-[calc(100vh-100px)] p-4">
+      {/* Map Column - Left side, full height */}
       <div className="lg:col-span-7 h-full flex flex-col justify-between space-y-4">
+        {/* Header */}
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.push("/rider-dashboard")}
-            className="p-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition"
+            className="p-2.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-5 h-5" />
           </button>
-          <div>
-            <h1 className="text-xl font-black text-gray-950 dark:text-white tracking-tight">Active Delivery Map</h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400 font-semibold">Real-time status updates every 5s</p>
+          <div className="flex-1">
+            <h1 className="text-2xl font-bold text-gray-950 dark:text-white">
+              Delivery Tracking
+            </h1>
+            <p className="text-sm text-gray-600 dark:text-gray-400 font-medium">
+              Order #{order?.orderNumber}
+            </p>
           </div>
         </div>
 
-        <div className="flex-1 min-h-[300px] relative rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-800 shadow-2xl">
-          <LeafletMap
-            riderPosition={riderCoords}
-            vendorPosition={
-              order.vendor?.latitude ? [order.vendor.latitude, order.vendor.longitude] : null
-            }
-            customerPosition={
-              order.address?.latitude ? [order.address.latitude, order.address.longitude] : null
-            }
-            className="w-full h-full absolute inset-0"
-          />
+        {/* Map Container */}
+        <div className="flex-1 rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-800 shadow-lg relative">
+          {order ? (
+            <LeafletMap
+              riderPosition={riderCoords}
+              vendorPosition={
+                order?.vendor?.latitude && order?.vendor?.longitude
+                  ? [order.vendor.latitude, order.vendor.longitude]
+                  : null
+              }
+              customerPosition={
+                order?.address?.latitude && order?.address?.longitude
+                  ? [order.address.latitude, order.address.longitude]
+                  : null
+              }
+              className="w-full h-full absolute inset-0"
+            />
+          ) : (
+            <div className="w-full h-full bg-gray-200 dark:bg-gray-800 flex items-center justify-center">
+              <div className="text-center space-y-3">
+                <Loader className="w-10 h-10 text-gray-400 animate-spin mx-auto" />
+                <p className="text-sm text-gray-600 dark:text-gray-400 font-medium">
+                  Loading order...
+                </p>
+              </div>
+            </div>
+          )}
 
-          {/* Floating overlays */}
-          <div className="absolute bottom-4 left-4 right-4 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border border-gray-200 dark:border-gray-800 p-4 rounded-xl flex items-center justify-between shadow-xl z-[1000]">
-            <div>
-              <p className="text-[10px] text-gray-550 dark:text-gray-450 font-bold uppercase tracking-widest">Next Target</p>
-              <p className="text-sm font-extrabold text-gray-955 dark:text-white">
-                {["ACCEPTED", "RIDER_ASSIGNED", "ARRIVED_VENDOR"].includes(order.status)
-                  ? "🏪 Vendor Store"
-                  : "🏠 Customer Address"}
-              </p>
-            </div>
-            <div className="flex items-center gap-6">
-              <div className="text-right">
-                <p className="text-[10px] text-gray-550 dark:text-gray-450 font-bold uppercase tracking-widest">Distance</p>
-                <p className="text-sm font-extrabold text-emerald-600 dark:text-emerald-400">{distance ? `${distance} km` : "--"}</p>
+          {/* Map Info Overlay */}
+          <div className="absolute bottom-4 left-4 right-4 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm border border-gray-200 dark:border-gray-700 rounded-xl p-4 shadow-xl z-[1000]">
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <p className="text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-widest">
+                  Target
+                </p>
+                <p className="text-sm font-bold text-gray-900 dark:text-white mt-1">
+                  {["RIDER_ASSIGNED", "ACCEPTED", "ARRIVED_VENDOR"].includes(order?.status || "")
+                    ? "🏪 Vendor"
+                    : "🏠 Customer"}
+                </p>
               </div>
-              <div className="text-right">
-                <p className="text-[10px] text-gray-550 dark:text-gray-450 font-bold uppercase tracking-widest">ETA</p>
-                <p className="text-sm font-extrabold text-amber-600 dark:text-amber-400">{eta ? `${eta} mins` : "--"}</p>
+              <div>
+                <p className="text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-widest">
+                  Distance
+                </p>
+                <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                  {distance ? `${distance} km` : "---"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-widest">
+                  ETA
+                </p>
+                <p className="text-sm font-bold text-amber-600 dark:text-amber-400 mt-1">
+                  {eta ? `${eta} mins` : "---"}
+                </p>
               </div>
             </div>
+          </div>
+
+          {/* Status Badge */}
+          <div className="absolute top-4 left-4 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 shadow-lg z-[999]">
+            <p className="text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-widest">
+              Status
+            </p>
+            <p className="text-sm font-bold text-gray-900 dark:text-white mt-0.5">
+              {order?.status?.replace(/_/g, " ")}
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Details Panel */}
-      <div className="lg:col-span-5 flex flex-col justify-between bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 h-full overflow-y-auto space-y-6 shadow-sm">
-        {/* Step Visualizer */}
-        <div className="space-y-4">
-          <h2 className="text-base font-extrabold text-gray-955 dark:text-white tracking-tight">Delivery Stages</h2>
+      {/* Details Panel - Right side */}
+      <div className="lg:col-span-5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 h-full overflow-y-auto shadow-lg space-y-6">
+        {/* Delivery Stages */}
+        <div className="space-y-3">
+          <h2 className="text-base font-bold text-gray-950 dark:text-white">
+            Delivery Progress
+          </h2>
           <div className="relative flex items-center justify-between">
-            <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 bg-gray-100 dark:bg-gray-805 h-1 z-0" />
-            {steps.map((step, idx) => (
-              <div key={idx} className="relative z-10 flex flex-col items-center">
-                <div
-                  className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black border-2 transition ${
-                    step.active
-                      ? "bg-red-600 border-red-500 text-white"
-                      : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 text-gray-400 dark:text-gray-600"
-                  }`}
-                >
-                  {idx + 1}
+            <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 bg-gray-200 dark:bg-gray-800 rounded-full z-0" />
+            {[
+              { label: "Accepted", status: "ACCEPTED" },
+              { label: "At Vendor", status: "ARRIVED_VENDOR" },
+              { label: "Picked Up", status: "PICKED_UP" },
+              { label: "Arrived", status: "ARRIVED_CUSTOMER" },
+              { label: "Delivered", status: "DELIVERED" },
+            ].map((step, idx) => {
+              const isActive = order
+                ? ["RIDER_ASSIGNED", "ACCEPTED", "ARRIVED_VENDOR", "PICKED_UP", "ARRIVED_CUSTOMER", "DELIVERED"].includes(
+                    order.status
+                  )
+                : false;
+              // Map RIDER_ASSIGNED to index 1 (same as ACCEPTED)
+              const normalizedStatus = order?.status === "RIDER_ASSIGNED" ? "ACCEPTED" : (order?.status || "");
+              const stepIndex =
+                ["ACCEPTED", "ARRIVED_VENDOR", "PICKED_UP", "ARRIVED_CUSTOMER", "DELIVERED"].indexOf(
+                  normalizedStatus
+                ) + 1;
+
+              return (
+                <div key={idx} className="relative z-10 flex flex-col items-center">
+                  <div
+                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 transition ${
+                      idx < stepIndex
+                        ? "bg-red-600 border-red-500 text-white"
+                        : "bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-500 dark:text-gray-400"
+                    }`}
+                  >
+                    {idx + 1}
+                  </div>
+                  <p className="text-[10px] font-bold text-gray-600 dark:text-gray-400 mt-1.5 text-center whitespace-nowrap">
+                    {step.label}
+                  </p>
                 </div>
-                <span className="text-[8px] font-bold mt-1.5 uppercase text-gray-500 dark:text-gray-400 tracking-wide text-center">
-                  {step.label}
-                </span>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="border-t border-gray-200 dark:border-gray-800 pt-6" />
+
+        {/* Vendor Info */}
+        <div className="space-y-3">
+          <h3 className="text-sm font-bold text-gray-950 dark:text-white flex items-center gap-2">
+            <Store className="w-4 h-4 text-red-600" />
+            Pickup Location
+          </h3>
+          <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 rounded-lg p-3 space-y-2">
+            <p className="font-bold text-gray-900 dark:text-white text-sm">
+              {order?.vendor?.name || "Restaurant"}
+            </p>
+            <p className="text-xs text-gray-600 dark:text-gray-400">
+              {order?.vendor?.address || "Vendor Address"}
+            </p>
+            {order?.vendor?.phone && (
+              <a
+                href={`tel:${order.vendor.phone}`}
+                className="inline-flex items-center gap-2 text-xs font-bold text-red-600 dark:text-red-400 hover:underline mt-2"
+              >
+                <Phone className="w-3.5 h-3.5" />
+                {order.vendor.phone}
+              </a>
+            )}
+          </div>
+        </div>
+
+        {/* Customer Info */}
+        <div className="space-y-3">
+          <h3 className="text-sm font-bold text-gray-950 dark:text-white flex items-center gap-2">
+            <MapPin className="w-4 h-4 text-emerald-600" />
+            Delivery Location
+          </h3>
+          <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30 rounded-lg p-3 space-y-2">
+            <p className="font-bold text-gray-900 dark:text-white text-sm">
+              {order?.customer?.name || "Customer"}
+            </p>
+            <p className="text-xs text-gray-600 dark:text-gray-400">
+              {order?.address?.streetAddress || "Delivery Address"}
+            </p>
+            {order?.address?.city && (
+              <p className="text-xs text-gray-600 dark:text-gray-400">
+                {order.address.city}
+                {order?.address?.zipCode && `, ${order.address.zipCode}`}
+              </p>
+            )}
+            {order?.customer?.phone && (
+              <a
+                href={`tel:${order.customer.phone}`}
+                className="inline-flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline mt-2"
+              >
+                <Phone className="w-3.5 h-3.5" />
+                {order.customer.phone}
+              </a>
+            )}
+          </div>
+        </div>
+
+        <div className="border-t border-gray-200 dark:border-gray-800 pt-6" />
+
+        {/* Order Items */}
+        {order?.items && order.items.length > 0 && (
+          <div className="space-y-3">
+            <h3 className="text-sm font-bold text-gray-950 dark:text-white flex items-center gap-2">
+              <Package className="w-4 h-4 text-blue-600" />
+              Order Items
+            </h3>
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {order.items.map((item, idx) => (
+                <div key={idx} className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 flex justify-between items-center">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-gray-900 dark:text-white truncate">
+                      {item.name}
+                    </p>
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400">
+                      Qty: {item.quantity}
+                    </p>
+                  </div>
+                  <p className="text-xs font-bold text-gray-900 dark:text-white ml-2">
+                    ₹{(item.price * item.quantity).toLocaleString("en-IN")}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Price Breakdown */}
+        <div className="space-y-3">
+          <h3 className="text-sm font-bold text-gray-950 dark:text-white flex items-center gap-2">
+            <DollarSign className="w-4 h-4 text-green-600" />
+            Order Summary
+          </h3>
+          <div className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-2 text-xs">
+            {order?.subtotal && (
+              <div className="flex justify-between text-gray-700 dark:text-gray-300">
+                <span>Subtotal</span>
+                <span>₹{order.subtotal.toLocaleString("en-IN")}</span>
               </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Vendor & Customer cards */}
-        <div className="space-y-4 flex-1 pt-4 border-t border-gray-100 dark:border-gray-800/80">
-          {/* Vendor */}
-          <div className="flex gap-3 items-start animate-fade-in">
-            <div className="p-2 bg-red-50 dark:bg-red-955/30 border border-red-200 dark:border-red-900/30 rounded-xl text-red-500">
-              <Store className="w-5 h-5" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-gray-500 dark:text-gray-400">Vendor</p>
-              <h3 className="text-sm font-black text-gray-955 dark:text-white">{order.vendor?.name}</h3>
-              <p className="text-xs text-gray-550 dark:text-gray-400 line-clamp-1">{order.vendor?.address}</p>
-              {order.vendor?.phone && (
-                <a
-                  href={`tel:${order.vendor.phone}`}
-                  className="inline-flex items-center gap-1 text-[10px] font-bold text-red-500 mt-1 hover:underline"
-                >
-                  <Phone className="w-3 h-3" /> Call Store
-                </a>
-              )}
-            </div>
-          </div>
-
-          {/* Customer */}
-          <div className="flex gap-3 items-start pt-3 border-t border-gray-100 dark:border-gray-850 animate-fade-in">
-            <div className="p-2 bg-emerald-50 dark:bg-emerald-955/30 border border-emerald-200 dark:border-emerald-900/30 rounded-xl text-emerald-500">
-              <MapPin className="w-5 h-5" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-gray-500 dark:text-gray-400">Customer Details</p>
-              <h3 className="text-sm font-black text-gray-955 dark:text-white">{order.customer?.name || "Customer"}</h3>
-              <p className="text-xs text-gray-550 dark:text-gray-400 line-clamp-1">{order.address?.streetAddress || "Deliver Location"}</p>
-              {order.customer?.phone && (
-                <a
-                  href={`tel:${order.customer.phone}`}
-                  className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-500 mt-1 hover:underline"
-                >
-                  <Phone className="w-3 h-3" /> Call Customer
-                </a>
-              )}
+            )}
+            {order?.taxAmount && order.taxAmount > 0 && (
+              <div className="flex justify-between text-gray-700 dark:text-gray-300">
+                <span>Tax</span>
+                <span>₹{order.taxAmount.toLocaleString("en-IN")}</span>
+              </div>
+            )}
+            {order?.deliveryFee && order.deliveryFee > 0 && (
+              <div className="flex justify-between text-gray-700 dark:text-gray-300">
+                <span>Delivery Fee</span>
+                <span>₹{order.deliveryFee.toLocaleString("en-IN")}</span>
+              </div>
+            )}
+            {order?.platformFee && order.platformFee > 0 && (
+              <div className="flex justify-between text-gray-700 dark:text-gray-300">
+                <span>Platform Fee</span>
+                <span>₹{order.platformFee.toLocaleString("en-IN")}</span>
+              </div>
+            )}
+            {order?.discountAmount && order.discountAmount > 0 && (
+              <div className="flex justify-between text-emerald-700 dark:text-emerald-300 font-bold">
+                <span>Discount</span>
+                <span>-₹{order.discountAmount.toLocaleString("en-IN")}</span>
+              </div>
+            )}
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex justify-between font-bold text-gray-900 dark:text-white">
+              <span>Total Amount</span>
+              <span className="text-green-600 dark:text-green-400">
+                ₹{order?.totalAmount?.toLocaleString("en-IN") || "0"}
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Action Button Section */}
-        <div className="pt-5 border-t border-gray-100 dark:border-gray-800 space-y-3">
-          {order.status === "ACCEPTED" && (
+        <div className="border-t border-gray-200 dark:border-gray-800 pt-6" />
+
+        {/* Action Buttons */}
+        <div className="space-y-3">
+          {["RIDER_ASSIGNED", "ACCEPTED"].includes(order?.status || "") && (
             <button
               onClick={() => handleUpdateStatus("ARRIVED_VENDOR")}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl uppercase tracking-wider transition"
+              className="w-full py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-sm rounded-lg transition shadow-lg"
             >
-              Confirm: Arrived at Vendor
+              ✓ Arrived at Vendor
             </button>
           )}
 
-          {order.status === "ARRIVED_VENDOR" && (
+          {order?.status === "ARRIVED_VENDOR" && (
             <button
               onClick={() => handleUpdateStatus("PICKED_UP")}
-              className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs rounded-xl uppercase tracking-wider transition"
+              className="w-full py-3 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white font-bold text-sm rounded-lg transition shadow-lg"
             >
-              Confirm: Picked Up Order
+              ✓ Order Picked Up
             </button>
           )}
 
-          {order.status === "PICKED_UP" && (
+          {order?.status === "PICKED_UP" && (
             <button
               onClick={() => handleUpdateStatus("ARRIVED_CUSTOMER")}
-              className="w-full py-3 bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-xs rounded-xl uppercase tracking-wider transition"
+              className="w-full py-3 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white font-bold text-sm rounded-lg transition shadow-lg"
             >
-              Confirm: Arrived at Customer
+              ✓ Arrived at Customer
             </button>
           )}
 
-          {order.status === "ARRIVED_CUSTOMER" && (
+          {order?.status === "ARRIVED_CUSTOMER" && (
             <div className="space-y-3">
               <div className="relative">
                 <input
                   type="text"
-                  placeholder="Enter 4-digit Delivery OTP"
+                  placeholder="Enter 4-digit OTP"
                   value={otpInput}
-                  onChange={(e) => setOtpInput(e.target.value)}
-                  className="w-full bg-gray-50 dark:bg-gray-955 border border-gray-200 dark:border-gray-800 text-gray-955 dark:text-white font-bold text-center py-2.5 rounded-xl placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:border-emerald-500 text-sm tracking-widest"
+                  onChange={(e) => setOtpInput(e.target.value.slice(0, 4))}
+                  maxLength={4}
+                  className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white font-bold text-center py-3 rounded-lg placeholder-gray-500 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-lg tracking-widest"
                 />
-                <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <ShieldCheck className="w-5 h-5 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2" />
               </div>
               <button
                 onClick={() => handleUpdateStatus("DELIVERED")}
                 disabled={otpInput.length < 4}
-                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:text-gray-400 dark:disabled:text-gray-500 text-white font-extrabold text-xs rounded-xl uppercase tracking-wider transition shadow-lg shadow-emerald-950/20"
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white disabled:text-gray-600 dark:disabled:text-gray-400 font-bold text-sm rounded-lg transition shadow-lg"
               >
-                Confirm Delivery
+                ✓ Confirm Delivery
               </button>
             </div>
           )}
 
-          {order.status === "DELIVERED" && (
-            <div className="w-full py-3 bg-gray-50 dark:bg-gray-850 text-gray-500 font-extrabold text-xs rounded-xl text-center uppercase tracking-wider border border-gray-150 dark:border-gray-800">
-              Delivery Completed ✓
+          {order?.status === "DELIVERED" && (
+            <div className="w-full py-3 bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-400 font-bold text-sm rounded-lg text-center border border-green-300 dark:border-green-700">
+              ✓ Delivery Completed
             </div>
           )}
+
+          <button
+            onClick={() => router.push("/rider-dashboard")}
+            className="w-full py-2 border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 font-medium text-sm rounded-lg transition"
+          >
+            Back to Dashboard
+          </button>
         </div>
       </div>
     </div>
