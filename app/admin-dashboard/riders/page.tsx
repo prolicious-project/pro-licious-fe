@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store/store";
 import { api } from "@/lib/axios";
-import { X, Eye, FileText, CheckCircle, ShieldAlert, AlertCircle, Truck } from "lucide-react";
+import { X, Eye, FileText, CheckCircle, ShieldAlert, AlertCircle, Truck, Plus } from "lucide-react";
 import AdminSidebar from "@/components/AdminSidebar";
 import OrderStatusBadge from "@/components/OrderStatusBadge";
 
@@ -16,6 +16,22 @@ export default function AdminRidersPage() {
   const [riders, setRiders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [riderName, setRiderName] = useState("");
+  const [riderPhone, setRiderPhone] = useState("");
+  const [riderEmail, setRiderEmail] = useState("");
+  const [riderPassword, setRiderPassword] = useState("");
+  const [vehicleType, setVehicleType] = useState("");
+  const [vehicleNumber, setVehicleNumber] = useState("");
+  const [licenseNumber, setLicenseNumber] = useState("");
+  const [rcNumber, setRcNumber] = useState("");
+  const [panNumber, setPanNumber] = useState("");
+  const [riderAddress, setRiderAddress] = useState("");
+  const [licenseDocUrl, setLicenseDocUrl] = useState("");
+  const [rcDocUrl, setRcDocUrl] = useState("");
+  const [panDocUrl, setPanDocUrl] = useState("");
+  const [otherDocUrls, setOtherDocUrls] = useState("");
 
   // Documents modal state
   const [selectedRider, setSelectedRider] = useState<any>(null);
@@ -48,6 +64,56 @@ export default function AdminRidersPage() {
       setError(e.response?.data?.message || "Could not update rider status.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCreateRider = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+
+    const documents = [
+      licenseDocUrl ? { documentType: "LICENSE", fileUrl: licenseDocUrl } : null,
+      rcDocUrl ? { documentType: "RC_BOOK", fileUrl: rcDocUrl } : null,
+      panDocUrl ? { documentType: "PAN_CARD", fileUrl: panDocUrl } : null,
+      ...otherDocUrls
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((fileUrl) => ({ documentType: "OTHER_DOC", fileUrl })),
+    ].filter(Boolean) as { documentType: string; fileUrl: string }[];
+
+    try {
+      await api.post("/api/admin/riders", {
+        name: riderName,
+        phone: riderPhone,
+        email: riderEmail,
+        password: riderPassword,
+        vehicleType,
+        vehicleNumber,
+        licenseNumber,
+        rcNumber,
+        panNumber,
+        address: riderAddress,
+        documents,
+      });
+      setShowCreateModal(false);
+      setRiderName("");
+      setRiderPhone("");
+      setRiderEmail("");
+      setRiderPassword("");
+      setVehicleType("");
+      setVehicleNumber("");
+      setLicenseNumber("");
+      setRcNumber("");
+      setPanNumber("");
+      setRiderAddress("");
+      setLicenseDocUrl("");
+      setRcDocUrl("");
+      setPanDocUrl("");
+      setOtherDocUrls("");
+      await fetchRiders();
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Could not create rider account.");
     }
   };
 
@@ -86,6 +152,9 @@ export default function AdminRidersPage() {
           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
             <Truck className="w-5 h-5 text-red-600" /> Platform Riders
           </h2>
+          <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold text-xs shadow-sm transition-colors">
+            <Plus className="w-4 h-4" /> Add Rider
+          </button>
         </header>
 
         <div className="flex-grow overflow-hidden flex flex-col p-8 space-y-6">
@@ -108,9 +177,9 @@ export default function AdminRidersPage() {
               <table className="w-full text-sm text-left">
                 <thead className="text-xs text-gray-500 bg-zinc-50 uppercase font-bold border-b border-gray-100 sticky top-0">
                   <tr>
-                    <th className="px-6 py-4">Rider ID</th>
-                    <th className="px-6 py-4">Vehicle Details</th>
-                    <th className="px-6 py-4">License Number</th>
+                    <th className="px-6 py-4">Rider</th>
+                    <th className="px-6 py-4">Contact</th>
+                    <th className="px-6 py-4">Vehicle</th>
                     <th className="px-6 py-4">Status</th>
                     <th className="px-6 py-4">Documents</th>
                     <th className="px-6 py-4">Actions</th>
@@ -119,13 +188,18 @@ export default function AdminRidersPage() {
                 <tbody>
                   {riders.map((rider) => (
                     <tr key={rider.id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                      <td className="px-6 py-4 font-bold text-gray-900">#RD-{rider.id}</td>
+                      <td className="px-6 py-4">
+                        <p className="font-bold text-gray-900">{rider.name || "Unnamed Rider"}</p>
+                        <p className="text-[10px] text-gray-400 font-mono mt-0.5">#RD-{rider.id}</p>
+                      </td>
+                      <td className="px-6 py-4 text-xs text-gray-600">
+                        <p className="font-semibold text-gray-800">{rider.phone || "No phone"}</p>
+                        <p className="text-[11px] text-gray-400 mt-0.5">{rider.email || "No email"}</p>
+                      </td>
                       <td className="px-6 py-4">
                         <p className="font-bold text-gray-950">{rider.vehicleType || "N/A"}</p>
                         <p className="text-[10px] text-gray-400 font-mono mt-0.5">{rider.vehicleNumber || "No number"}</p>
-                      </td>
-                      <td className="px-6 py-4 text-xs font-medium text-gray-600">
-                        {rider.licenseNumber || "N/A"}
+                        <p className="text-[10px] text-gray-400 mt-0.5">License: {rider.licenseNumber || "N/A"}</p>
                       </td>
                       <td className="px-6 py-4">
                         <OrderStatusBadge status={rider.status} />
@@ -165,6 +239,53 @@ export default function AdminRidersPage() {
           </div>
         </div>
       </main>
+
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl p-6 space-y-6">
+            <div className="flex justify-between items-center border-b border-gray-100 pb-4">
+              <h3 className="font-extrabold text-lg text-gray-900">Add New Rider</h3>
+              <button onClick={() => setShowCreateModal(false)} className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+            </div>
+
+            <form onSubmit={handleCreateRider} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Rider Name</label><input type="text" required placeholder="Full name" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={riderName} onChange={(e) => setRiderName(e.target.value)} /></div>
+                <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Phone Number</label><input type="text" required placeholder="10 digit phone number" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={riderPhone} onChange={(e) => setRiderPhone(e.target.value)} /></div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Email Address</label><input type="email" required placeholder="rider@prolicious.com" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={riderEmail} onChange={(e) => setRiderEmail(e.target.value)} /></div>
+                <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Password</label><input type="password" required placeholder="Minimum 6 characters" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={riderPassword} onChange={(e) => setRiderPassword(e.target.value)} /></div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Vehicle Type</label><input type="text" placeholder="Bike / Scooter / Car" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={vehicleType} onChange={(e) => setVehicleType(e.target.value)} /></div>
+                <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Vehicle Number</label><input type="text" placeholder="Vehicle registration number" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} /></div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">License Number</label><input type="text" placeholder="Driving license number" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={licenseNumber} onChange={(e) => setLicenseNumber(e.target.value)} /></div>
+                <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">RC Number</label><input type="text" placeholder="Vehicle RC number" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={rcNumber} onChange={(e) => setRcNumber(e.target.value)} /></div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">PAN Number</label><input type="text" placeholder="PAN number" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={panNumber} onChange={(e) => setPanNumber(e.target.value)} /></div>
+                <div><label className="block text-xs font-bold text-gray-500 uppercase mb-1">Address</label><input type="text" placeholder="Current address" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={riderAddress} onChange={(e) => setRiderAddress(e.target.value)} /></div>
+              </div>
+              <div className="rounded-xl border border-red-100 bg-red-50/60 p-4 space-y-3">
+                <p className="text-xs font-bold uppercase tracking-wider text-red-700">Document URLs / references</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input type="url" placeholder="License document URL" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={licenseDocUrl} onChange={(e) => setLicenseDocUrl(e.target.value)} />
+                  <input type="url" placeholder="RC book URL" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={rcDocUrl} onChange={(e) => setRcDocUrl(e.target.value)} />
+                  <input type="url" placeholder="PAN card URL" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={panDocUrl} onChange={(e) => setPanDocUrl(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Other Documents (one URL per line)</label>
+                  <textarea rows={4} placeholder="Paste other rider document URLs, one per line" className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 outline-none" value={otherDocUrls} onChange={(e) => setOtherDocUrls(e.target.value)} />
+                </div>
+              </div>
+              <button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow-md transition-colors mt-6 uppercase text-xs tracking-wider">Create Rider Account</button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* VIEW DOCUMENTS MODAL */}
       {selectedRider && (
