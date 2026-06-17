@@ -230,6 +230,8 @@ export const adminApi = {
     api.post("/api/admin/vendors", data),
   updateVendorStatus: (id: number, status: string) =>
     api.patch(`/api/admin/vendors/${id}/status`, { status }),
+  deleteVendor: (id: number) =>
+    api.delete(`/api/admin/vendors/${id}`),
   getVendorDocs: (id: number) =>
     api.get(`/api/admin/vendors/${id}/documents`),
   verifyVendorDoc: (vendorId: number, docId: number, status: string) =>
