@@ -37,6 +37,7 @@ export default function AdminVendorsPage() {
   const [selectedVendor, setSelectedVendor] = useState<any>(null);
   const [documents, setDocuments] = useState<any[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [vendorToDelete, setVendorToDelete] = useState<any>(null);
 
   const fetchVendors = async () => {
     try {
@@ -67,14 +68,14 @@ export default function AdminVendorsPage() {
     }
   };
 
-  const handleDeleteVendor = async (vendorId: number) => {
-    const confirmed = window.confirm("Are you sure you want to delete this vendor? This action cannot be undone.");
-    if (!confirmed) return;
+  const handleDeleteVendor = async () => {
+    if (!vendorToDelete) return;
 
     try {
       setLoading(true);
       setError("");
-      await api.delete(`/api/admin/vendors/${vendorId}`);
+      await api.delete(`/api/admin/vendors/${vendorToDelete.id}`);
+      setVendorToDelete(null);
       await fetchVendors();
     } catch (e: any) {
       setError(e.response?.data?.message || "Could not delete vendor.");
@@ -239,7 +240,7 @@ export default function AdminVendorsPage() {
                           </button>
                         )}
                         <button
-                          onClick={() => handleDeleteVendor(vendor.id)}
+                          onClick={() => setVendorToDelete(vendor)}
                           className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded font-bold text-xs shadow-sm flex items-center gap-1"
                           title="Delete vendor"
                         >
@@ -254,6 +255,31 @@ export default function AdminVendorsPage() {
           </div>
         </div>
       </main>
+
+      {vendorToDelete && (
+        <div className="fixed inset-0 bg-black/45 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl p-6 space-y-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-rose-500 font-bold">Confirm deletion</p>
+                <h3 className="mt-2 text-xl font-extrabold text-gray-900">Delete this vendor?</h3>
+                <p className="mt-2 text-sm text-gray-500">This will remove the vendor account from the platform. This action cannot be undone.</p>
+              </div>
+              <button onClick={() => setVendorToDelete(null)} className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="rounded-2xl border border-rose-100 bg-rose-50 p-4 text-sm text-rose-700">
+              <p className="font-semibold">Vendor to remove:</p>
+              <p className="mt-1">{vendorToDelete.name} ({vendorToDelete.email || "No email"})</p>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setVendorToDelete(null)} className="px-4 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 font-semibold text-sm hover:bg-gray-50">Cancel</button>
+              <button onClick={handleDeleteVendor} className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-sm shadow-sm flex items-center gap-2"><Trash2 className="w-4 h-4" /> Delete Vendor</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* CREATE VENDOR MODAL */}
       {showCreateModal && (
