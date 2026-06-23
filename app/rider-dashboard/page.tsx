@@ -815,19 +815,12 @@ export default function RiderDashboard() {
         setIsOnline(earningsData.isOnline);
       }
 
-      // Filter pending orders - show all orders except those marked as DELIVERED, COMPLETED, CANCELLED, or REJECTED
-      let pending = ordersData.filter((o) => {
+      // Filter pending orders - show assignments that are PENDING or ASSIGNED
+      const pending = ordersData.filter((o) => {
         if (!o) return false;
-        
-        const status = (o.orderStatus || o.status)?.toUpperCase() || "UNKNOWN";
-        const terminalStatuses = ["DELIVERED", "COMPLETED", "CANCELLED", "REJECTED"];
-        return !terminalStatuses.includes(status);
+        const assignmentStatus = o.assignmentStatus?.toUpperCase() || "";
+        return assignmentStatus === "ASSIGNED" || assignmentStatus === "PENDING";
       });
-
-      // FALLBACK: If all orders were filtered out, show ALL orders (for test/demo data with all terminal statuses)
-      if (pending.length === 0 && ordersData.length > 0) {
-        pending = ordersData;
-      }
 
       setPendingOrders(pending);
 
@@ -848,9 +841,8 @@ export default function RiderDashboard() {
       // Filter active order (rider already accepted, delivery in progress)
       const active = ordersData.find((o) => {
         if (!o) return false;
-        const status = (o.orderStatus || o.status)?.toUpperCase() || "";
-        const activeStatuses = ["ACCEPTED", "PICKED_UP", "ARRIVED_VENDOR", "ARRIVED_CUSTOMER", "IN_TRANSIT"];
-        return activeStatuses.includes(status);
+        const assignmentStatus = o.assignmentStatus?.toUpperCase() || "";
+        return assignmentStatus === "ACCEPTED";
       });
       console.log("Active order:", active);
       setActiveOrder(active || null);

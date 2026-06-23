@@ -593,7 +593,7 @@ export default function VendorOrdersPage() {
                         {order.paymentMethod || "N/A"}
                       </td>
                       <td className="px-6 py-4 flex gap-2">
-                        {order.status === "PLACED" && (
+                        {["PLACED", "PAID"].includes(order.status) && (
                           <>
                             <button
                               onClick={(e) =>
@@ -637,7 +637,7 @@ export default function VendorOrdersPage() {
                             Mark Ready
                           </button>
                         )}
-                        {!["PLACED", "ACCEPTED", "PREPARING"].includes(
+                        {!["PLACED", "PAID", "ACCEPTED", "PREPARING"].includes(
                           order.status
                         ) && (
                           <span className="text-gray-400 font-medium text-xs">
@@ -791,7 +791,7 @@ export default function VendorOrdersPage() {
 
                 {/* Action Buttons */}
                 <div className="pt-4 flex gap-3">
-                  {selectedOrder.status === "PLACED" && (
+                  {["PLACED", "PAID"].includes(selectedOrder.status) && (
                     <>
                       <button
                         onClick={(e) =>

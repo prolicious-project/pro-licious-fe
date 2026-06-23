@@ -15,7 +15,6 @@ const VENDOR_IMGS = [
   "https://images.unsplash.com/photo-1516467508483-a7212febe31a?q=80&w=600&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1615937657715-bc7b4b7962c1?q=80&w=600&auto=format&fit=crop",
 ];
-
 const CATEGORY_IMGS = [
   "https://images.unsplash.com/photo-1604503468506-a8da13d82791?q=80&w=300&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1603360946369-dc9bb6258143?q=80&w=300&auto=format&fit=crop",
@@ -24,7 +23,6 @@ const CATEGORY_IMGS = [
   "https://images.unsplash.com/photo-1628268909376-e8c4dfedb180?q=80&w=300&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1514326640560-7d063ef2aed5?q=80&w=300&auto=format&fit=crop",
 ];
-
 export default function Home() {
   const { isAuthenticated } = useAuthGuard();
   const [vendors, setVendors] = useState<any[]>([]);
@@ -34,12 +32,10 @@ export default function Home() {
   const [searchResults, setSearchResults] = useState<any[] | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [favorites, setFavorites] = useState<Set<number>>(new Set());
-  
   const categoryScrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
+useEffect(() => {
     if (!isAuthenticated) return;
-    Promise.all([
+    Promise.all([                    
       customerApi.getVendors(),
       customerApi.getCategories(),
     ])

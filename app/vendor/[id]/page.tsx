@@ -14,7 +14,7 @@ import { api } from "@/lib/axios";
 export default function VendorMenuPage() {
   const params = useParams();
   const router = useRouter();
-  const dispatch = useDispatch();
+  const dispatch = useDispatch();  
   const { isAuthenticated } = useSelector((state: RootState) => state.auth);
   const cartItems = useSelector((state: RootState) => state.cart.items);
 
@@ -36,7 +36,7 @@ export default function VendorMenuPage() {
             cartItemId: ci.id,
             name: menuItem.name || "Item",
             price: ci.price,
-            quantity: ci.quantity,
+            quantity: ci.quantity,         
             vendorId: vendorIdVal,
           };
         });
@@ -48,7 +48,7 @@ export default function VendorMenuPage() {
       console.error("Error syncing cart:", e);
     }
   };
-
+         
   useEffect(() => {
     if (!isAuthenticated) { router.push("/login"); return; }
     const id = params.id;
