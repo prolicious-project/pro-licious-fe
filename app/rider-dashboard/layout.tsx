@@ -265,9 +265,9 @@ export default function RiderLayout({
   );
 
   return (
-    <div className="min-h-screen flex bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans transition-colors duration-250">
+    <div className="h-screen flex overflow-hidden bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 font-sans transition-colors duration-250">
       {/* Desktop Sidebar */}
-      <aside className="hidden md:block w-64 flex-shrink-0 border-r border-gray-200 dark:border-gray-800">
+      <aside className="hidden md:block w-64 flex-shrink-0 h-screen border-r border-gray-200 dark:border-gray-800">
         <SidebarContent />
       </aside>
 

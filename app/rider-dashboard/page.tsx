@@ -767,117 +767,209 @@ export default function RiderDashboard() {
   };
 
   // ============ FETCH RIDER DATA ============
-  const fetchRiderData = async (force = false) => {
-    try {
-      // Throttle API calls (max once every 10 seconds unless force=true)
-      const now = Date.now();
-      if (!force && now - lastFetchRef.current < 10000) {
-        console.log("Skipping fetch - throttled");
-        return;
-      }
-      lastFetchRef.current = now;
+ const fetchRiderData = async (force = false, isInitial = false) => {
+  try {
+    const now = Date.now();
 
-      setError("");
-      const [ordersRes, earningsRes] = await Promise.all([
-        api.get("/api/rider/orders"),
-        api.get("/api/rider/earnings/summary"),
-      ]);
-
-      // Extract orders array - handle multiple possible response structures
-      let ordersData: Order[] = [];
-      if (Array.isArray(ordersRes.data)) {
-        ordersData = ordersRes.data;
-      } else if (Array.isArray(ordersRes.data?.data)) {
-        ordersData = ordersRes.data.data;
-      } else if (ordersRes.data?.orders) {
-        ordersData = ordersRes.data.orders;
-      } else if (ordersRes.data?.result) {
-        ordersData = Array.isArray(ordersRes.data.result) ? ordersRes.data.result : [];
-      }
-
-      // Deduplicate ordersData by orderId (API may return multiple assignment rows per order)
-      // Keep the last entry per orderId (most recent assignment takes precedence)
-      const orderMap = new Map<number, Order>();
-      for (const o of ordersData) {
-        const key = o.orderId || o.id || 0;
-        orderMap.set(key, o);
-      }
-      ordersData = Array.from(orderMap.values());
-
-      const earningsData = earningsRes.data?.data || earningsRes.data || {};
-
-      // Update all orders
-      setAllOrders(ordersData);
-      setEarnings(earningsData);
-
-      // Initialize isOnline state from earnings summary
-      if (earningsData && typeof earningsData.isOnline === "boolean") {
-        setIsOnline(earningsData.isOnline);
-      }
-
-      // Filter pending orders - show assignments that are PENDING or ASSIGNED
-      const pending = ordersData.filter((o) => {
-        if (!o) return false;
-        const assignmentStatus = o.assignmentStatus?.toUpperCase() || "";
-        return assignmentStatus === "ASSIGNED" || assignmentStatus === "PENDING";
-      });
-
-      setPendingOrders(pending);
-
-      // Set timers for pending orders (only add new ones, don't reset existing)
-      if (pending.length > 0) {
-        setTimers((prev) => {
-          const next = { ...prev };
-          pending.forEach((o) => {
-            const id = o.orderId || o.id;
-            if (id && !(id in next)) {
-              next[id] = 30;
-            }
-          });
-          return next;
-        });
-      }
-
-      // Filter active order (rider already accepted, delivery in progress)
-      const active = ordersData.find((o) => {
-        if (!o) return false;
-        const assignmentStatus = o.assignmentStatus?.toUpperCase() || "";
-        return assignmentStatus === "ACCEPTED";
-      });
-      console.log("Active order:", active);
-      setActiveOrder(active || null);
-
-      // Filter recent deliveries (terminal successful states), deduplicated by orderId
-      const seenOrderIds = new Set<number>();
-      const delivered = ordersData
-        .filter((o) => {
-          if (!o) return false;
-          const status = (o.orderStatus || o.status)?.toUpperCase() || "";
-          return status === "DELIVERED" || status === "COMPLETED";
-        })
-        .sort(
-          (a, b) =>
-            new Date(b.assignedAt || 0).getTime() -
-            new Date(a.assignedAt || 0).getTime()
-        )
-        .filter((o) => {
-          const key = o.orderId || o.id || 0;
-          if (seenOrderIds.has(key)) return false;
-          seenOrderIds.add(key);
-          return true;
-        })
-        .slice(0, 5);
-      console.log("Recent deliveries:", delivered);
-      setRecentDeliveries(delivered);
-
-    } catch (err: any) {
-      console.error("Fetch error:", err);
-      const errorMsg = err.response?.data?.message || "Failed to load orders";
-      setError(errorMsg);
-    } finally {
-      setLoading(false);
+    if (!force && now - lastFetchRef.current < 10000) {
+      console.log("Skipping fetch - throttled");
+      return;
     }
-  };
+
+    lastFetchRef.current = now;
+
+    if (isInitial) {
+      setLoading(true);
+    }
+    setError("");
+
+    let ordersRes: any = null;
+    let earningsRes: any = null;
+
+    try {
+      ordersRes = await api.get("/api/rider/orders");
+    } catch (err) {
+      console.error("Orders API Error:", err);
+    }
+
+    try {
+      earningsRes = await api.get("/api/rider/earnings/summary");
+    } catch (err) {
+      console.error("Earnings API Error:", err);
+    }
+
+    // =========================
+    // Orders Extraction
+    // =========================
+    let ordersData: Order[] = [];
+
+    const ordersRaw = ordersRes?.data;
+
+    if (Array.isArray(ordersRaw)) {
+      ordersData = ordersRaw;
+    } else if (Array.isArray(ordersRaw?.data)) {
+      ordersData = ordersRaw.data;
+    } else if (Array.isArray(ordersRaw?.orders)) {
+      ordersData = ordersRaw.orders;
+    } else if (Array.isArray(ordersRaw?.result)) {
+      ordersData = ordersRaw.result;
+    }
+
+    console.log("Orders Data:", ordersData);
+
+    // =========================
+    // Deduplicate Orders
+    // =========================
+    const orderMap = new Map<number, Order>();
+
+    for (const order of ordersData) {
+      const key = order.orderId || order.id || 0;
+      orderMap.set(key, order);
+    }
+
+    ordersData = Array.from(orderMap.values());
+
+    // =========================
+    // Earnings
+    // =========================
+    const earningsData =
+      earningsRes?.data?.data ||
+      earningsRes?.data ||
+      {};
+
+    setAllOrders(ordersData);
+    setEarnings(earningsData);
+
+    if (typeof earningsData.isOnline === "boolean") {
+      setIsOnline(earningsData.isOnline);
+    }
+
+    // =========================
+    // Pending Orders
+    // =========================
+    const pending = ordersData.filter((order) => {
+      if (!order) return false;
+
+      const assignmentStatus =
+        order.assignmentStatus?.toUpperCase() || "";
+
+      return (
+        assignmentStatus === "ASSIGNED" ||
+        assignmentStatus === "PENDING"
+      );
+    });
+
+    console.log("Pending Orders:", pending);
+
+    setPendingOrders(pending);
+
+    if (pending.length > 0) {
+      setTimers((prev) => {
+        const next = { ...prev };
+
+        pending.forEach((order) => {
+          const id = order.orderId || order.id;
+
+          if (id && !(id in next)) {
+            next[id] = 30;
+          }
+        });
+
+        return next;
+      });
+    }
+
+    // =========================
+    // Active Order
+    // =========================
+    const active = ordersData.find((order) => {
+      if (!order) return false;
+
+      const assignmentStatus =
+        order.assignmentStatus?.toUpperCase() || "";
+
+      const orderStatus =
+        (
+          order.orderStatus ||
+          order.status ||
+          ""
+        ).toUpperCase();
+
+      return (
+        assignmentStatus === "ACCEPTED" &&
+        ![
+          "DELIVERED",
+          "COMPLETED",
+          "REJECTED",
+          "CANCELLED",
+        ].includes(orderStatus)
+      );
+    });
+
+    console.log("Active Order:", active);
+
+    setActiveOrder(active || null);
+
+    // =========================
+    // Recent Deliveries
+    // =========================
+    const seenOrderIds = new Set<number>();
+
+    const delivered = ordersData
+      .filter((order) => {
+        if (!order) return false;
+
+        const status =
+          (
+            order.orderStatus ||
+            order.status ||
+            ""
+          ).toUpperCase();
+
+        return (
+          status === "DELIVERED" ||
+          status === "COMPLETED"
+        );
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.assignedAt || 0).getTime() -
+          new Date(a.assignedAt || 0).getTime()
+      )
+      .filter((order) => {
+        const key =
+          order.orderId ||
+          order.id ||
+          0;
+
+        if (seenOrderIds.has(key)) {
+          return false;
+        }
+
+        seenOrderIds.add(key);
+        return true;
+      })
+      .slice(0, 5);
+
+    console.log(
+      "Recent Deliveries:",
+      delivered
+    );
+
+    setRecentDeliveries(delivered);
+
+  } catch (err: any) {
+    console.error("Fetch Error:", err);
+
+    const errorMsg =
+      err?.response?.data?.message ||
+      "Failed to load rider dashboard";
+
+    setError(errorMsg);
+  } finally {
+    setLoading(false);
+  }
+};
 
   // ============ HANDLE TOGGLE AVAILABILITY ============
   const handleToggleAvailability = async () => {
@@ -910,7 +1002,7 @@ export default function RiderDashboard() {
     }
 
     // Initial fetch
-    fetchRiderData(true);
+    fetchRiderData(true, true);
 
     // Refresh every 30 seconds
     const interval = setInterval(() => {
@@ -1255,7 +1347,7 @@ export default function RiderDashboard() {
 
         {pendingOrders.length === 0 ? (
           <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-12 text-center flex flex-col items-center justify-center space-y-4 shadow-sm">
-            <Compass className="w-12 h-12 text-gray-400 animate-spin" />
+            <Compass className="w-12 h-12 text-gray-400  animate-spin" />
             <div className="space-y-1">
               <h3 className="font-bold text-gray-900 dark:text-white">
                 No Orders Yet

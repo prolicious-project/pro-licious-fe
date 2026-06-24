@@ -143,6 +143,12 @@ export default function OrderHistory() {
     }
   };
 
+  console.log({
+  loading,
+  ordersCount: orders.length,
+  filteredCount: filtered.length,
+});
+
   return (
     <div className="relative space-y-8 max-w-7xl mx-auto min-h-screen pb-12">
       <div>
