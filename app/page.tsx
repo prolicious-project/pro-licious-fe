@@ -10,13 +10,13 @@ import { customerApi } from "@/services/api";
 import { useAuthGuard } from "@/hooks/useAuthGuard";
 
 const VENDOR_IMGS = [
-  "https://images.unsplash.com/photo-1607006411061-0b5c1fb981f4?q=80&w=600&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1553163147-622ab57be1c7?q=80&w=600&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1516467508483-a7212febe31a?q=80&w=600&auto=format&fit=crop",
-  "https://images.unsplash.com/photo-1615937657715-bc7b4b7962c1?q=80&w=600&auto=format&fit=crop",
+  "https://media.istockphoto.com/id/2282137289/photo/assortment-of-raw-meat-chicken-beef-veal-carnivore-diet.jpg?s=2048x2048&w=is&k=20&c=c_fxzXu5ws7u6MVmMvYoZvcDZ8qPEa_UFSHFoP66nJ4=",
+  "https://media.istockphoto.com/id/860919410/photo/chef-in-hotel-or-restaurant-kitchen-cooking-only-hands-prepared-salmon-steak-with-dill.jpg?s=2048x2048&w=is&k=20&c=7SXxR7FPy6sENQsRCivv1nO9TpcCkIMywT5yVU0ztVI=",
+  "https://media.istockphoto.com/id/1475032701/photo/close-view-of-butchers-shop-meat-cuts-display.jpg?s=2048x2048&w=is&k=20&c=uziTblVVhCMC-HJUZnoT4sVK6FK70jG9qqBF7kfbRJ4=",
+  "https://media.istockphoto.com/id/1189476532/photo/foods-high-in-zinc.jpg?s=2048x2048&w=is&k=20&c=eCT9yn_2a76S65lNi8dqx0EDv7KUp7flkwQxLsy1I-w=",
 ];
 const CATEGORY_IMGS = [
-  "https://images.unsplash.com/photo-1604503468506-a8da13d82791?q=80&w=300&auto=format&fit=crop",
+  "https://media.istockphoto.com/id/998699576/photo/chicken-fillet.jpg?s=2048x2048&w=is&k=20&c=FAVoiLQxWq-z9duRqDdkIG7FtN2Tx-NsQnKKcqYjAzU=",
   "https://images.unsplash.com/photo-1603360946369-dc9bb6258143?q=80&w=300&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1615141982883-c7ad0e69fd62?q=80&w=300&auto=format&fit=crop",
   "https://images.unsplash.com/photo-1587486913049-53fc88980cfc?q=80&w=300&auto=format&fit=crop",

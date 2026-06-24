@@ -13,6 +13,9 @@ export const authApi = {
   login: (email: string, password: string) =>
     api.post("/api/auth/login", { email, password }),
 
+  register: (data: { name: string; email?: string; phone: string; password?: string; role?: string }) =>
+    api.post("/api/auth/register", data),
+
   refreshToken: (refreshToken: string) =>
     api.post("/api/auth/refresh-token", { refreshToken }),
 

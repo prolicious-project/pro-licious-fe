@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ShoppingBag, Menu, BarChart3, Wallet, Settings, AlertCircle, LogOut } from "lucide-react";
+import { LayoutDashboard, ShoppingBag, Menu, BarChart3, Wallet, Settings, AlertCircle, LogOut, UserCircle } from "lucide-react";
 import { useDispatch } from "react-redux";
 import { logout } from "@/store/slices/authSlice";
 import { useRouter } from "next/navigation";
@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: "/vendor-dashboard/orders", icon: ShoppingBag, label: "Orders" },
   { href: "/vendor-dashboard/menu", icon: Menu, label: "Menu" },
   { href: "/vendor-dashboard/settlements", icon: Wallet, label: "Settlements" },
+  { href: "/vendor-dashboard/profile", icon: UserCircle, label: "Profile" },
   { href: "/vendor-dashboard/settings", icon: Settings, label: "Settings" },
 ];
 

@@ -7,6 +7,7 @@ import { api } from "@/lib/axios";
 import { authApi } from "@/services/api";
 import { useRouter } from "next/navigation";
 import { Mail, Lock, ArrowRight, AlertCircle, Phone, User, ShieldCheck } from "lucide-react";
+import Link from "next/link";
 
 export default function LoginPage() {
   const [activeTab, setActiveTab] = useState<"signin" | "signup">("signin");
@@ -152,8 +153,11 @@ export default function LoginPage() {
     } catch (err: any) {
       console.error(err);
       const msg = err.response?.data?.message || "";
-      if (activeTab === "signin" && msg.includes("Name required for signup")) {
-        setError("This phone number is not registered. Please use the Sign Up tab to create an account first.");
+      if (msg.includes("Name required for signup")) {
+        setError("This phone number is not registered. Redirecting you to sign up...");
+        setTimeout(() => {
+          router.push(`/signup?phone=${phone}`);
+        }, 1500);
       } else {
         setError(msg || "Invalid OTP verification code.");
       }
@@ -216,16 +220,12 @@ export default function LoginPage() {
             >
               Sign In
             </button>
-            <button
-              onClick={() => { setActiveTab("signup"); handleResetPhoneFlow(); }}
-              className={`flex-1 py-3 text-center text-xs font-bold uppercase tracking-wider rounded-xl transition ${
-                activeTab === "signup"
-                  ? "bg-red-600 text-white shadow-lg shadow-red-600/20"
-                  : "text-zinc-400 hover:text-zinc-200"
-              }`}
+            <Link
+              href="/signup"
+              className="flex-1 py-3 text-center text-xs font-bold uppercase tracking-wider rounded-xl transition text-zinc-400 hover:text-zinc-200"
             >
               Sign Up
-            </button>
+            </Link>
           </div>
 
           <div className="text-center mb-8">
@@ -405,93 +405,13 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* SIGN UP VIEW */}
-          {activeTab === "signup" && (
-            <div className="space-y-5">
-              {!isOtpSent ? (
-                <form onSubmit={handleSendOtp} className="space-y-5">
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Full Name</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        <User className="h-4 w-4 text-zinc-500" />
-                      </div>
-                      <input
-                        type="text"
-                        required
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        className="block w-full pl-11 pr-4 py-3 bg-zinc-950 border border-zinc-800 rounded-xl text-white placeholder-zinc-650 focus:outline-none focus:border-red-500 text-xs transition"
-                        placeholder="John Doe"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Phone Number</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                        <Phone className="h-4 w-4 text-zinc-500" />
-                      </div>
-                      <input
-                        type="tel"
-                        required
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                        className="block w-full pl-11 pr-4 py-3 bg-zinc-950 border border-zinc-800 rounded-xl text-white placeholder-zinc-650 focus:outline-none focus:border-red-500 text-xs transition"
-                        placeholder="10-digit number"
-                      />
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="w-full flex justify-center items-center gap-2 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white py-3.5 rounded-xl font-bold text-sm transition disabled:opacity-50 shadow-lg shadow-red-600/10 cursor-pointer"
-                  >
-                    {isLoading ? "Sending OTP..." : "Send Verification Code"} <ArrowRight className="w-4 h-4" />
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={handleVerifyOtp} className="space-y-5">
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase tracking-wider mb-2">Verification Code (6-digit OTP)</label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        required
-                        value={otp}
-                        onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                        maxLength={6}
-                        className="block w-full py-3.5 bg-zinc-950 border border-zinc-800 rounded-xl text-white font-bold text-center placeholder-zinc-650 focus:outline-none focus:border-red-500 text-lg tracking-[0.5em] transition"
-                        placeholder="000000"
-                      />
-                    </div>
-                    <p className="text-[10px] text-zinc-500 font-medium text-center mt-2">
-                      Code sent to <span className="text-zinc-300 font-bold">{phone}</span>
-                    </p>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      onClick={handleResetPhoneFlow}
-                      className="flex-1 py-3 border border-zinc-800 hover:bg-zinc-800 text-zinc-300 font-bold text-xs rounded-xl transition cursor-pointer"
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isLoading || otp.length < 6}
-                      className="flex-[2] py-3 bg-red-600 hover:bg-red-700 active:bg-red-800 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:cursor-not-allowed text-white font-bold text-xs rounded-xl transition shadow-lg shadow-red-600/10 cursor-pointer"
-                    >
-                      {isLoading ? "Verifying..." : "Verify & Sign Up"}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-          )}
+          {/* SignUp Link for Sign In Forms */}
+          <div className="mt-6 text-center text-xs text-zinc-400">
+            Don't have an account?{" "}
+            <Link href="/signup" className="text-red-500 hover:text-red-400 font-bold ml-1">
+              Sign Up here
+            </Link>
+          </div>
 
           {/* Demo Accounts dropdown info */}
           <div className="mt-8 text-center border-t border-zinc-800 pt-6">

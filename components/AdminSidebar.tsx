@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Store, Truck, Users, Activity, AlertTriangle, ShieldCheck, Settings, FileText, LogOut } from "lucide-react";
+import { LayoutDashboard, Store, Truck, Users, Activity, AlertTriangle, ShieldCheck, Settings, FileText, LogOut, UserCircle } from "lucide-react";
 import { useDispatch } from "react-redux";
 import { logout } from "@/store/slices/authSlice";
 import { useRouter } from "next/navigation";
@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { href: "/admin-dashboard/tickets", icon: AlertTriangle, label: "Tickets" },
   { href: "/admin-dashboard/audit-logs", icon: ShieldCheck, label: "Audit Logs" },
   { href: "/admin-dashboard/settings", icon: Settings, label: "Settings" },
+  { href: "/admin-dashboard/profile", icon: UserCircle, label: "My Profile" },
 ];
 
 export default function AdminSidebar() {
@@ -53,7 +54,7 @@ export default function AdminSidebar() {
           );
         })}
       </div>
-      <div className="p-4 border-t border-zinc-800">
+      <div className="p-4 border-t border-zinc-800">               
         <button onClick={handleLogout} className="flex items-center gap-3 px-3 py-2 w-full text-zinc-400 hover:text-red-400 hover:bg-zinc-800 rounded-lg font-medium transition-colors">
           <LogOut className="w-5 h-5" /> Logout
         </button>

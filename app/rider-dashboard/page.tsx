@@ -648,6 +648,8 @@ import {
   MapPin,
   Store,
   Compass,
+  UserCircle,
+  LogOut,
 } from "lucide-react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -1297,6 +1299,14 @@ export default function RiderDashboard() {
             <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse" />
             Live Connected
           </div>
+
+          <Link
+            href="/rider-dashboard/profile"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-bold transition-colors"
+          >
+            <UserCircle className="w-4 h-4" />
+            My Profile
+          </Link>
         </div>
       </div>
 
