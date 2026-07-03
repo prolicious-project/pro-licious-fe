@@ -1,5 +1,5 @@
 const { io } = require('socket.io-client');
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:5000';
+const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || 'https://pro-licious-be.vercel.app';
 const socket = io(SOCKET_URL, { transports: ['polling', 'websocket'], autoConnect: true });
 
 socket.on('connect', () => {
