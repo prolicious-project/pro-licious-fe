@@ -56,6 +56,7 @@ Redux Toolkit manages the global state for the application.
 Create a `.env.local` file in the root of `pro-licious-fe` if your backend runs on a different port:
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:5000
+in production - https://pro-licious-be.vercel.app
 NEXT_PUBLIC_SOCKET_URL=http://localhost:5000
 ```
 
